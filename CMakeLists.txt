@@ -20,6 +20,7 @@ install(PROGRAMS
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_cartesian_startup test/test_cartesian_startup.py)
+  ament_add_pytest_test(test_cartesian_jog test/test_cartesian_jog.py)
   ament_add_pytest_test(test_home_moveit_client test/test_home_moveit_client.py)
   ament_add_pytest_test(test_alignment test/test_alignment.py)
   ament_add_pytest_test(test_desktop_installer test/test_desktop_installer.py)

@@ -32,6 +32,7 @@ from mir_srvs.srv import ColorRGB
 from match_mur_gui.alignment import plane_alignment, plane_alignments
 from match_mur_gui.ros_discovery import configure_ros_discovery
 from match_mur_gui.processes import stop_ros_process
+from match_mur_gui.jog_commands import cartesian_twist
 
 
 if not os.environ.get("WS"):
@@ -1592,11 +1593,7 @@ class ManipulatorJogDialog(QtWidgets.QDialog):
                 )
             self.active = [0.0] * 6
             return
-        self.active = [0.0] * 6
-        offset = 0 if self.mode == "translation" else 3
-        speed = self.linear_speed.value() if self.mode == "translation" else self.angular_speed.value()
-        for index, value in enumerate(vector):
-            self.active[offset + index] = value * speed
+        self.active = cartesian_twist(vector,self.mode,self.linear_speed.value(),self.angular_speed.value())
 
     def _tick(self):
         current = self.ros_worker.current_lift_height(self.robot_name(), self.side)

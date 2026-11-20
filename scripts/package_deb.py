@@ -52,6 +52,7 @@ if [[ ! -r "$ros_setup" ]]; then
   exit 1
 fi
 source "$ros_setup"
+export AMENT_PREFIX_PATH="/usr${AMENT_PREFIX_PATH:+:$AMENT_PREFIX_PATH}"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-62}"
 exec ros2 run match_mur_gui general_mur_gui.py "$@"
 ''').encode()
@@ -79,8 +80,11 @@ def build_deb(source: Path, install_root: Path, output: Path, *, version: str,
     source, install_root, output = Path(source), Path(install_root), Path(output)
     package_lib = install_root / 'lib' / ROS_PACKAGE
     package_share = install_root / 'share' / ROS_PACKAGE
-    if not package_lib.is_dir() or not package_share.is_dir():
-        raise ValueError(f'Paketinstallation fehlt: {install_root} muss lib/{ROS_PACKAGE} und share/{ROS_PACKAGE} enthalten')
+    python_site_packages = next((path for path in sorted((install_root / 'lib').glob('python*/site-packages'))
+                                 if (path / ROS_PACKAGE).is_dir()), None)
+    if not package_lib.is_dir() or not package_share.is_dir() or python_site_packages is None:
+        raise ValueError(f'Paketinstallation fehlt: {install_root} muss lib/{ROS_PACKAGE}, '
+                         f'lib/python*/site-packages/{ROS_PACKAGE} und share/{ROS_PACKAGE} enthalten')
     if not re.fullmatch(r'[0-9][A-Za-z0-9.+:~\-]*', version):
         raise ValueError(f'Ungültige Debian-Version: {version}')
     if architecture is None:
@@ -92,8 +96,14 @@ def build_deb(source: Path, install_root: Path, output: Path, *, version: str,
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='mur-gui-deb-') as temporary:
         root = Path(temporary)
-        shutil.copytree(install_root / 'lib', root / 'usr/lib')
+        shutil.copytree(package_lib, root / 'usr/lib' / ROS_PACKAGE)
         shutil.copytree(install_root / 'share', root / 'usr/share', dirs_exist_ok=True)
+        python_destination = root / 'usr/lib/python3/dist-packages'
+        python_destination.mkdir(parents=True)
+        shutil.copytree(python_site_packages / ROS_PACKAGE,
+                        python_destination / ROS_PACKAGE)
+        for metadata in python_site_packages.glob(f'{ROS_PACKAGE}-*.egg-info'):
+            shutil.copytree(metadata, python_destination / metadata.name)
         launcher = root / 'usr/bin' / APP[0]
         launcher.parent.mkdir(parents=True, exist_ok=True)
         launcher.write_bytes(_launcher())

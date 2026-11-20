@@ -26,10 +26,16 @@ source install/setup.bash
 ros2 run match_mur_gui mur_rviz_docking_prototype
 ```
 
-Pass an existing RViz config with `--config /path/to/view.rviz`. The optional
-`--context` label is shown in the RViz dock title. The GUI supports keys 1–7 to
-select Overview, Visualization, Robot, Processes, Diagnosis, Logs, and
-Settings.
+RViz loads the active preset's machine-local config path. Pass
+`--config /path/to/view.rviz` to override it for this launch. Connecting checks
+that the selected profile provides a readable RViz config before initializing
+ROS, then sets `use_sim_time` from the profile's Simulation or Hardware mode
+before starting RViz. Changing preset, mode, target, robot, visualization, ROS
+domain, or effective config disconnects the old RViz session; connect again to
+attach to the newly selected context. The dock titles and diagnostics show the
+same active profile. The optional `--context` label is retained for the host's
+initial title. The GUI supports keys 1–7 to select Overview, Visualization,
+Robot, Processes, Diagnosis, Logs, and Settings.
 
 The host remains a prototype; ROS graph connection feedback is limited to the
 RViz node starting. No simulation or hardware launch process is wired to the

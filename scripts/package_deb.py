@@ -53,6 +53,8 @@ if [[ ! -r "$ros_setup" ]]; then
 fi
 source "$ros_setup"
 export AMENT_PREFIX_PATH="/usr${AMENT_PREFIX_PATH:+:$AMENT_PREFIX_PATH}"
+export WS="${WS:-${XDG_DATA_HOME:-$HOME/.local/share}/match_mur_gui}"
+mkdir -p "$WS"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-62}"
 exec ros2 run match_mur_gui general_mur_gui.py "$@"
 ''').encode()

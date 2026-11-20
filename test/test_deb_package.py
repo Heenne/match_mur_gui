@@ -49,6 +49,8 @@ def test_deb_has_menu_entry_icon_launcher_and_ros_dependencies(tmp_path):
     assert 'ros_setup="/opt/ros/${ros_distro}/setup.bash"' in launcher
     assert 'source "$ros_setup"' in launcher
     assert 'export AMENT_PREFIX_PATH="/usr${AMENT_PREFIX_PATH:+:$AMENT_PREFIX_PATH}"' in launcher
+    assert 'export WS="${WS:-${XDG_DATA_HOME:-$HOME/.local/share}/match_mur_gui}"' in launcher
+    assert 'mkdir -p "$WS"' in launcher
     assert 'exec ros2 run match_mur_gui general_mur_gui.py "$@"' in launcher
     assert '/home/' not in launcher
     desktop = (extracted / 'usr/share/applications/mur-base-gui.desktop').read_text()

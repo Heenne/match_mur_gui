@@ -156,7 +156,10 @@ APT installiert die im Paket deklarierten ROS-, Qt- und QML-Laufzeitabhängigkei
 Auf dem Rechner müssen die passenden ROS-2-Jazzy-Paketquellen eingerichtet
 sein. Danach erscheint **MuR Basis-GUI** in der Ubuntu-Anwendungssuche. Der
 Starteintrag lädt `/opt/ros/$ROS_DISTRO/setup.bash` (standardmäßig Jazzy) und
-startet die installierte GUI, ohne einen Quell-Workspace vorauszusetzen.
+startet die installierte GUI, ohne einen Quell-Workspace vorauszusetzen. Ohne
+gesetztes `WS` verwendet sie `$XDG_DATA_HOME/match_mur_gui` (sonst
+`~/.local/share/match_mur_gui`) für benutzerschreibbare GUI-Daten. Für
+Hardwarezugriff den Remote-Workspace im GUI-Feld **Remote WS** konfigurieren.
 
 Alle GUIs mit der gemeinsamen MuR-Basis konfigurieren vor dem ROS-Start automatisch
 direkte DDS-Peers für die per SSH erreichbaren Hostnamen `mur620a` bis `mur620d`. Dadurch

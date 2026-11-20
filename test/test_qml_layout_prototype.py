@@ -27,3 +27,16 @@ def test_mocap_is_an_optional_session_view_with_explicit_bridge_ownership():
     ):
         assert binding in panel
     assert "app-owned" in panel and "external" in panel
+
+
+def test_hardware_robot_view_has_selected_ur_arm_hold_to_run_and_visible_stop():
+    qml = (ROOT / "prototype/qml/Main.qml").read_text()
+    panel = (ROOT / "prototype/qml/UrArmJog.qml").read_text()
+    assert "Panels.UrArmJog" in qml and 'visible: session.mode === "Hardware"' in qml
+    for contract in (
+        "controller.readiness", "controller.selectArm", "controller.setArmed",
+        "controller.press(modelData.axis)", "controller.release()",
+        "controller.stop(\"focus lost\")", "STOP · ",
+        "Translation ≤ 0.05 m/s", "Rotation ≤ 0.20 rad/s",
+    ):
+        assert contract in panel

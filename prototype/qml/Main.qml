@@ -101,7 +101,8 @@ Item {
                         width: parent.width
                         spacing: 12
                         Panels.SimBaseJog { Layout.fillWidth: true; Layout.preferredHeight: 260; visible: session.mode === "Simulation" }
-                        Panel { Layout.fillWidth: true; Layout.preferredHeight: 100; heading: "Other robot actions are not available in this prototype"; visible: session.mode !== "Simulation" }
+                        Panels.UrArmJog { Layout.fillWidth: true; Layout.preferredHeight: 610; controller: urArmJog; visible: session.mode === "Hardware" }
+                        Panel { Layout.fillWidth: true; Layout.preferredHeight: 100; heading: "Robot controls are available in the hardware arm panel"; visible: session.mode !== "Simulation" && session.view !== "Robot" }
                         Panels.GoalsPoses { Layout.fillWidth: true; Layout.preferredHeight: 440; goals: goalsPoses; sessionController: session }
                     }
                 }

@@ -1,6 +1,8 @@
 #include <memory>
 #include <string>
 #include <stdexcept>
+#include <chrono>
+#include <thread>
 
 #include <QApplication>
 #include <QDockWidget>
@@ -21,6 +23,8 @@
 #include "rclcpp/executors/single_threaded_executor.hpp"
 #include "rviz_common/ros_integration/ros_node_abstraction.hpp"
 #include "rviz_common/visualization_frame.hpp"
+#include "ros_session_monitor.hpp"
+#include "std_msgs/msg/string.hpp"
 
 namespace
 {
@@ -29,10 +33,12 @@ class SessionController : public QObject
   Q_OBJECT
   Q_PROPERTY(QString preset READ preset NOTIFY changed)
   Q_PROPERTY(QString target READ target NOTIFY changed)
+  Q_PROPERTY(int rosDomain READ rosDomain NOTIFY changed)
   Q_PROPERTY(QString robot READ robot NOTIFY changed)
   Q_PROPERTY(QString mode READ mode NOTIFY changed)
   Q_PROPERTY(QString view READ view NOTIFY changed)
   Q_PROPERTY(QString connectionState READ connectionState NOTIFY changed)
+  Q_PROPERTY(QStringList diagnostics READ diagnostics NOTIFY changed)
   Q_PROPERTY(QStringList presets READ presets NOTIFY changed)
 
 public:
@@ -51,10 +57,12 @@ public:
 
   QString preset() const { return settings_->value("activePreset").toString(); }
   QString target() const { return value("target", "localhost"); }
+  int rosDomain() const { return qEnvironmentVariableIntValue("ROS_DOMAIN_ID"); }
   QString robot() const { return value("robot", "mur620d"); }
   QString mode() const { return value("mode", preset() == "Local simulation" ? "Simulation" : "Hardware"); }
   QString view() const { return value("view", "Overview"); }
   QString connectionState() const { return connection_state_; }
+  QStringList diagnostics() const { return diagnostics_; }
   QStringList presets() const
   {
     settings_->beginGroup("presets");
@@ -93,12 +101,15 @@ public slots:
     static const QStringList valid = {"Overview", "Visualization", "Robot", "Processes", "Diagnosis", "Logs", "Settings"};
     if (valid.contains(view)) setValue("view", view);
   }
-  void connectToTarget() { emit connectRequested(); }
+  void connectToTarget() { if (connection_state_ == "Disconnected" || connection_state_.startsWith("Failed")) emit connectRequested(); }
+  void disconnectFromTarget() { emit disconnectRequested(); }
+  void setDiagnostics(const QStringList &diagnostics) { diagnostics_ = diagnostics; emit changed(); }
   void setConnectionState(const QString &state) { connection_state_ = state; emit changed(); }
 
 signals:
   void changed();
   void connectRequested();
+  void disconnectRequested();
 
 private:
   QString key(const QString &field) const { return QString("presets/%1/%2").arg(preset(), field); }
@@ -114,6 +125,7 @@ private:
   }
   std::unique_ptr<QSettings> settings_;
   QString connection_state_{"Disconnected"};
+  QStringList diagnostics_{"Not connected · choose Connect to inspect the existing ROS graph"};
 };
 
 bool run_session_contract_test()
@@ -123,6 +135,16 @@ bool run_session_contract_test()
     if (session.preset() != "Local simulation" || session.mode() != "Simulation" ||
       session.view() != "Overview" || session.target() != "localhost" ||
       session.robot() != "mur620d" || session.connectionState() != "Disconnected") return false;
+    int connect_requests = 0;
+    QObject::connect(&session, &SessionController::connectRequested, [&connect_requests]() {
+      ++connect_requests;
+    });
+    session.connectToTarget();
+    if (connect_requests != 1) return false;
+    const QStringList expected_diagnosis = {"ROS graph: no remote nodes discovered in this domain",
+      "Clock: missing (/clock has no publisher)"};
+    session.setDiagnostics(expected_diagnosis);
+    if (session.diagnostics() != expected_diagnosis) return false;
     session.selectView("Visualization");
     session.selectMode("Hardware");
     session.selectTarget("sim-host");
@@ -138,12 +160,54 @@ bool run_session_contract_test()
     if (restored.preset() != "Field test" || restored.mode() != "Hardware" ||
       restored.view() != "Processes" || restored.target() != "lab-host" ||
       restored.robot() != "mur620c" || restored.connectionState() != "Disconnected" ||
-      rclcpp::ok()) return false;
+      restored.diagnostics().isEmpty() || rclcpp::ok()) return false;
     restored.selectPreset("Local simulation");
     if (restored.view() != "Visualization" || restored.mode() != "Hardware" ||
       restored.target() != "sim-host" || restored.robot() != "mur620b") return false;
   }
   return !rclcpp::ok();
+}
+
+bool run_ros_session_monitor_contract_test()
+{
+  rclcpp::init(0, nullptr);
+  auto observer = std::make_shared<rclcpp::Node>("session_monitor_contract_observer");
+  auto fixture = std::make_shared<rclcpp::Node>("session_monitor_contract_fixture");
+  RosSessionMonitor monitor(observer);
+  auto wrong_type = fixture->create_publisher<std_msgs::msg::String>(
+    "/mur620d/mobile_base_controller/cmd_vel", 10);
+  using ListControllers = controller_manager_msgs::srv::ListControllers;
+  auto manager = fixture->create_service<ListControllers>(
+    "/mur620d/controller_manager/list_controllers",
+    [](const std::shared_ptr<ListControllers::Request>,
+      std::shared_ptr<ListControllers::Response> response) {
+      controller_manager_msgs::msg::ControllerState state;
+      state.name = "drive_controller";
+      state.state = "active";
+      response->controller.push_back(state);
+    });
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(observer);
+  executor.add_node(fixture);
+
+  bool passed = false;
+  for (int attempt = 0; attempt < 100; ++attempt) {
+    executor.spin_some();
+    const auto hardware = monitor.diagnose("localhost", "mur620d", "Hardware", 0);
+    if (hardware.join("\n").contains("drive_controller: active")) {
+      const auto simulation = monitor.diagnose("localhost", "mur620d", "Simulation", 0).join("\n");
+      passed = hardware.join("\n").contains("remote node(s) discovered") &&
+        hardware.join("\n").contains("wrong type on /mur620d/mobile_base_controller/cmd_vel") &&
+        hardware.join("\n").contains("Clock: not required in Hardware mode") &&
+        simulation.contains("Clock: missing (/clock has no publisher)");
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  executor.remove_node(observer);
+  executor.remove_node(fixture);
+  rclcpp::shutdown();
+  return passed;
 }
 
 class PrototypeWindow : public QMainWindow
@@ -162,7 +226,10 @@ public:
     command_center->setSource(QUrl::fromLocalFile(qml_path));
     setCentralWidget(command_center);
     connect(&ros_spin_timer_, &QTimer::timeout, this, &PrototypeWindow::spin_ros);
+    ros_spin_timer_.setInterval(10);
+    connect(&diagnosis_timer_, &QTimer::timeout, this, &PrototypeWindow::refresh_diagnosis);
     connect(session_, &SessionController::connectRequested, this, [this]() { connect_ros(); });
+    connect(session_, &SessionController::disconnectRequested, this, [this]() { disconnect_ros(); });
     for (int index = 0; index < 7; ++index) {
       auto * shortcut = new QShortcut(QKeySequence(QString::number(index + 1)), this);
       shortcut->setContext(Qt::WidgetWithChildrenShortcut);
@@ -198,6 +265,14 @@ public:
     if (ros_executor_) ros_executor_->spin_some();
   }
 
+  void refresh_diagnosis()
+  {
+    if (session_monitor_) {
+      session_->setDiagnostics(session_monitor_->diagnose(session_->target(), session_->robot(),
+        session_->mode(), session_->rosDomain()));
+    }
+  }
+
   void connect_ros()
   {
     if (rviz_node_) return;
@@ -208,6 +283,7 @@ public:
       rviz_node_ = std::make_shared<rviz_common::ros_integration::RosNodeAbstraction>(
         "mur_rviz_docking_prototype");
       ros_executor_->add_node(rviz_node_->get_raw_node());
+      session_monitor_ = std::make_unique<RosSessionMonitor>(rviz_node_->get_raw_node());
       auto * frame = new rviz_common::VisualizationFrame(rviz_node_);
       frame->setApp(qApp);
       frame->setSplashPath("");
@@ -225,10 +301,45 @@ public:
       });
       if (!config_path_.isEmpty()) frame->loadDisplayConfig(config_path_);
       ros_spin_timer_.start(10);
+      diagnosis_timer_.start(500);
       session_->setConnectionState("Connected");
+      session_->setDiagnostics(session_monitor_->diagnose(session_->target(), session_->robot(),
+        session_->mode(), session_->rosDomain()));
     } catch (const std::exception & error) {
+      session_monitor_.reset();
+      ros_spin_timer_.stop();
+      diagnosis_timer_.stop();
+      if (rviz_dock_) {
+        removeDockWidget(rviz_dock_);
+        delete rviz_dock_;
+        rviz_dock_ = nullptr;
+      }
+      if (ros_executor_ && rviz_node_) ros_executor_->remove_node(rviz_node_->get_raw_node());
+      ros_executor_.reset();
+      rviz_node_.reset();
+      if (rclcpp::ok()) rclcpp::shutdown();
+      session_->setDiagnostics({QString("Connection failed · %1").arg(error.what()),
+        "External processes were not started or stopped"});
       session_->setConnectionState(QString("Failed: %1").arg(error.what()));
     }
+  }
+
+  void disconnect_ros()
+  {
+    ros_spin_timer_.stop();
+    diagnosis_timer_.stop();
+    if (rviz_dock_) {
+      removeDockWidget(rviz_dock_);
+      delete rviz_dock_;
+      rviz_dock_ = nullptr;
+    }
+    session_monitor_.reset();
+    if (ros_executor_ && rviz_node_) ros_executor_->remove_node(rviz_node_->get_raw_node());
+    ros_executor_.reset();
+    rviz_node_.reset();
+    if (rclcpp::ok()) rclcpp::shutdown();
+    session_->setDiagnostics({"Disconnected · external ROS launches and processes were left running"});
+    session_->setConnectionState("Disconnected");
   }
 
 private:
@@ -237,8 +348,10 @@ private:
   SessionController * session_;
   std::shared_ptr<rviz_common::ros_integration::RosNodeAbstraction> rviz_node_;
   std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> ros_executor_;
+  std::unique_ptr<RosSessionMonitor> session_monitor_;
   QDockWidget * rviz_dock_{nullptr};
   QTimer ros_spin_timer_;
+  QTimer diagnosis_timer_;
 };
 }
 
@@ -259,6 +372,8 @@ int main(int argc, char ** argv)
       qml_path = arguments[++i];
     } else if (arguments[i] == "--contract-test-session") {
       // Exercised below before the GUI/ROS host is created.
+    } else if (arguments[i] == "--contract-test-ros-session-monitor") {
+      // Exercises the public monitor output against a live in-process ROS graph.
     } else if (arguments[i] == "--context" && i + 1 < arguments.size()) {
       context = arguments[++i];
     } else if (arguments[i] == "--help" || arguments[i] == "-h") {
@@ -297,6 +412,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Session contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-ros-session-monitor")) {
+    if (!run_ros_session_monitor_contract_test()) {
+      qCritical("ROS session monitor contract failed");
+      return 1;
+    }
+    qInfo("ROS session monitor contract passed");
     return 0;
   }
   PrototypeWindow window(config_path, context, qml_path);

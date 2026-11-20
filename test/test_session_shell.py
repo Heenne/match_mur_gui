@@ -21,7 +21,8 @@ def test_native_session_persists_user_choices_and_starts_disconnected():
     assert 'QString connection_state_{"Disconnected"}' in host
     assert "rclcpp::init(0, nullptr)" in host
     assert host.index("setCentralWidget(command_center)") < host.index("void connect_ros()")
-    assert host.index("void connect_ros()") < host.index("rclcpp::init(0, nullptr)")
+    connect_action = host.index("void connect_ros()")
+    assert "rclcpp::init(0, nullptr)" in host[connect_action:]
     assert "session.connectToTarget()" in qml
     assert "session.selectView" in qml
 
@@ -47,3 +48,17 @@ def test_session_choices_restore_after_restart_without_starting_ros(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "Session contract passed" in result.stderr + result.stdout
+
+
+def test_connect_action_exposes_live_ros_graph_diagnostics(tmp_path):
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    environment = os.environ.copy()
+    environment["MUR_COMMAND_CENTER_SETTINGS"] = str(tmp_path / "session.ini")
+    environment["ROS_DOMAIN_ID"] = "87"
+    environment["QT_QPA_PLATFORM"] = "offscreen"
+    result = subprocess.run(
+        [str(executable), "--contract-test-ros-session-monitor"],
+        env=environment, text=True, capture_output=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ROS session monitor contract passed" in result.stderr + result.stdout

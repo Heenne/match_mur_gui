@@ -41,12 +41,12 @@ before starting RViz. Changing preset, mode, target, robot, visualization, ROS
 domain, or effective config disconnects the old RViz session; connect again to
 attach to the newly selected context. The dock titles and diagnostics show the
 same active profile. The optional `--context` label is retained for the host's
-initial title. The GUI supports keys 1–7 to select Overview, Visualization,
-Robot, Processes, Diagnosis, Logs, and Settings.
+initial title. The GUI supports keys 1–8 to select Overview, Visualization,
+Robot, Processes, Diagnosis, Logs, Settings, and Mocap.
 
-The host remains a prototype; ROS graph connection feedback is limited to the
-RViz node starting. No simulation or hardware launch process is wired to the
-shell.
+The host remains a prototype; connecting confirms that its RViz node started,
+but does not prove reachability of every remote ROS endpoint. Full simulation
+and hardware launch flows are not yet wired to the shell.
 
 The Robot view includes profile-routed goals and saved poses. Simulation uses
 Nav2 `NavigateToPose` at `/<robot>/navigate_to_pose` and reads fresh
@@ -65,3 +65,17 @@ domain. When auto-open is enabled, starting simulation also requests a ROS
 connection and waits for `/clock`; the client is not started if the server is
 not confirmed within 60 seconds. Client launch output and failure state appear
 in Processes. The app does not discover Gazebo servers through Gazebo Transport.
+
+The optional **Mocap** view reads raw `/qualisys/<robot>/pose`, map-frame
+`/qualisys_map/<robot>/pose`, `/tf_static` (`map -> mocap`), and the per-robot
+`localization_frozen` status. It displays pose/frame, receipt rate, data age,
+map/TF availability, and freeze state. Map output and localization freeze use
+the existing Qualisys `SetBool` services. The view can start the existing
+`match_mocap_ros2 qualisys_ssh_bridge` with editable SSH/QTM hosts and port;
+these settings persist in the user's application settings. A detected
+`qualisys_ssh_bridge` node or existing robot pose publisher is treated as an
+external bridge: the app reuses its data and never stops it. Only a bridge
+started as the named `Qualisys Mocap bridge` process by this app exposes the
+stop action. Bridge output and exit state are recorded with the other launch
+logs. Map/TF output is enabled for an app-started bridge, with the existing
+bridge's calibration validation deciding whether it is available.

@@ -71,3 +71,21 @@ domain. When auto-open is enabled, starting simulation also requests a ROS
 connection and waits for `/clock`; the client is not started if the server is
 not confirmed within 60 seconds. Client launch output and failure state appear
 in Processes. The app does not discover Gazebo servers through Gazebo Transport.
+
+## Remote simulation process prototype
+
+From the Processes view, select a Simulation preset whose target is a remote
+host and choose **Start remote simulation**. The target must be a host alias or
+hostname accepted by SSH, the remote account must have non-interactive SSH key
+access, and `bash -lc` on that host must find the sourced ROS 2 Jazzy workspace
+and `mur_launch_sim` package. The selected ROS domain and robot name are passed
+to the remote launch. The app records remote stdout/stderr under a host- and
+run-specific log source.
+
+Each launch receives a random run ID and starts in a dedicated `setsid`
+process group. Stop connects over SSH again and checks the recorded PID's
+environment for that exact run ID and its process-group ID before sending
+SIGINT to the group. A foreign process is never selected by name or stopped.
+If SSH or the ownership check fails, the process row reports **Stop failed**
+and the log says the remote run may still be active. This prototype does not
+store SSH credentials; configure SSH keys or an agent on the operator account.

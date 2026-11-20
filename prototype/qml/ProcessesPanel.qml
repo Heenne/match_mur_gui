@@ -5,16 +5,23 @@ import QtQuick.Layouts 1.12
 Rectangle {
     id: root
     required property var processManager
+    property bool waitingForSimulationServer: false
+    property int autoOpenAttempts: 0
+    property bool autoOpenTimedOut: false
     color: "#1b2933"
     radius: 12
     border.color: "#2b3c47"
 
     function processState(name) {
-        for (var i = 0; i < processManager.processes.length; ++i) {
+        for (let i = 0; i < processManager.processes.length; ++i) {
             if (processManager.processes[i].name === name) return processManager.processes[i].state
         }
         return "Stopped"
     }
+    function isLocalTarget() {
+        return session.target === "localhost" || session.target === "127.0.0.1" || session.target === "::1"
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 18
@@ -23,31 +30,39 @@ Rectangle {
         Label { text: "Processes"; color: "#f2f6f8"; font.pixelSize: 20; font.bold: true }
         Label {
             Layout.fillWidth: true
-            text: "Start the simulation server and its ROS bridge. The Gazebo world view is a separately managed client; stopping it leaves the server and /clock running."
+            text: root.isLocalTarget()
+                  ? "Start the local MuR620 simulation in one action. Gazebo can run headless; its world view is a separate client."
+                  : "Start the MuR620 simulation over SSH on " + session.target + ". The remote ROS 2 Jazzy workspace must be available in a login shell; SSH keys or an agent must allow non-interactive access."
             color: "#a8bac5"
             wrapMode: Text.WordWrap
         }
         RowLayout {
             Button {
-                text: "Start simulation"
+                text: root.isLocalTarget() ? "Start simulation" : "Start remote simulation"
+                enabled: session.mode === "Simulation"
                 onClicked: {
-                    if (root.processManager.startSimulation(session.robot) && session.gazeboViewOnSimulationStart) {
-                        root.waitingForSimulationServer = true
-                        root.autoOpenAttempts = 0
-                        root.autoOpenTimedOut = false
-                        if (session.connectionState !== "Connected") session.connectToTarget()
+                    if (root.isLocalTarget()) {
+                        if (root.processManager.startSimulation(session.robot) && session.gazeboViewOnSimulationStart) {
+                            root.waitingForSimulationServer = true
+                            root.autoOpenAttempts = 0
+                            root.autoOpenTimedOut = false
+                            if (session.connectionState !== "Connected") session.connectToTarget()
+                        }
+                    } else {
+                        root.processManager.startRemoteSimulation(session.target, session.rosDomain, session.robot)
                     }
                 }
             }
             Button {
                 text: root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" ? "Close Gazebo world view" : "Open Gazebo world view"
-                enabled: root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" || session.simulationServerAvailable
+                enabled: root.isLocalTarget() &&
+                         (root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" || session.simulationServerAvailable)
                 onClicked: {
                     if (root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting") root.processManager.stopProcess("Gazebo world view")
                     else root.processManager.startGazeboView()
                 }
             }
-            Button { text: "Stop app processes"; onClicked: root.processManager.stopAll() }
+            Button { text: "Stop app-owned processes"; onClicked: root.processManager.stopAll() }
         }
         Label {
             Layout.fillWidth: true
@@ -93,10 +108,11 @@ Rectangle {
                             RowLayout {
                                 Layout.fillWidth: true
                                 Label { text: modelData.name; color: "#f2f6f8"; font.bold: true }
-                                Label { text: modelData.state; color: modelData.state === "Failed" ? "#f07178" : "#45d6a8" }
+                                Label { text: modelData.host.length ? "@ " + modelData.host : "local"; color: "#a8bac5" }
+                                Label { text: modelData.state; color: modelData.state === "Failed" || modelData.state === "Stop failed" || modelData.state === "Stop unconfirmed" ? "#f07178" : modelData.state === "Connecting" || modelData.state === "Stopping" ? "#f0b44d" : "#45d6a8" }
                                 Label { text: modelData.exitCode >= 0 ? "exit " + modelData.exitCode : ""; color: "#a8bac5" }
                                 Item { Layout.fillWidth: true }
-                                Button { text: "Stop"; enabled: modelData.state === "Running" || modelData.state === "Starting"; onClicked: root.processManager.stopProcess(modelData.name) }
+                                Button { text: "Stop"; enabled: modelData.state === "Running" || modelData.state === "Starting" || modelData.state === "Connecting" || modelData.state === "Stop failed" || modelData.state === "Stop unconfirmed"; onClicked: root.processManager.stopProcess(modelData.name) }
                                 Button { text: "Open log"; onClicked: { logs.showSource(root.processManager.logSource(modelData.name)); logs.raiseDock() } }
                             }
                             TextArea {
@@ -122,8 +138,4 @@ Rectangle {
             elide: Text.ElideLeft
         }
     }
-
-    property bool waitingForSimulationServer: false
-    property int autoOpenAttempts: 0
-    property bool autoOpenTimedOut: false
 }

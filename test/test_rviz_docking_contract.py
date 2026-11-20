@@ -42,3 +42,9 @@ def test_remote_discovery_configures_domain_and_direct_peer_before_ros_init():
     result = _run("--contract-test-remote-discovery")
     assert result.returncode == 0, result.stderr
     assert "Remote discovery contract passed" in result.stderr + result.stdout
+
+
+def test_gazebo_auto_open_preference_is_persistent_per_preset():
+    result = _run("--contract-test-gazebo-preset")
+    assert result.returncode == 0, result.stderr
+    assert "Gazebo preset contract passed" in result.stderr + result.stdout

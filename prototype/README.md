@@ -8,12 +8,12 @@ ROS node and creates the RViz dock.
 
 Session state is stored by `QSettings` in the user's application config
 directory (`MATCH/MuRCommandCenter`), outside the source tree. Preset, target,
-robot, mode, and last view are stored per preset. A new preset opens Overview.
+robot, mode, Gazebo auto-open preference, and last view are stored per preset. A new preset opens Overview.
 Connection state is in memory only and always starts Disconnected. The shell
 does not start simulator or robot processes.
 
 Profiles can be edited and exported as versioned `.murpreset.json` bundles.
-Bundles include mode, target host, ROS domain, robot, visualization choice, and optional local
+Bundles include mode, target host, ROS domain, robot, visualization choice, Gazebo auto-open preference, and optional local
 workspace/RViz config references. Import maps these references to local paths;
 blank mappings explicitly leave the references unassigned. The portable
 allowlist omits the personal last view, layout, log filters, and credentials.
@@ -56,3 +56,12 @@ expected message type and receiver are discovered. A profile never falls back
 to the other mode's adapter. Poses are stored under the user's application
 configuration directory; **Import MiR poses** accepts the legacy JSON array
 and `{ "poses": [...] }` formats and merges imported entries by name.
+
+The Processes view starts the local MuR620 simulation and manages the Gazebo
+world view as a separate `gz sim -g` client. Starting or stopping the client
+does not stop the simulation server, `/clock`, ROS bridge, or their logs. The
+client can be opened later when `/clock` is discovered in the selected ROS
+domain. When auto-open is enabled, starting simulation also requests a ROS
+connection and waits for `/clock`; the client is not started if the server is
+not confirmed within 60 seconds. Client launch output and failure state appear
+in Processes. The app does not discover Gazebo servers through Gazebo Transport.

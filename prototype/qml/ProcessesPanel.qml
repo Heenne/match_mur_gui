@@ -9,6 +9,12 @@ Rectangle {
     radius: 12
     border.color: "#2b3c47"
 
+    function processState(name) {
+        for (var i = 0; i < processManager.processes.length; ++i) {
+            if (processManager.processes[i].name === name) return processManager.processes[i].state
+        }
+        return "Stopped"
+    }
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 18
@@ -17,14 +23,52 @@ Rectangle {
         Label { text: "Processes"; color: "#f2f6f8"; font.pixelSize: 20; font.bold: true }
         Label {
             Layout.fillWidth: true
-            text: "Start the local MuR620 simulation in one action. Gazebo GUI is disabled; each app-started process has its own status and captured output."
+            text: "Start the simulation server and its ROS bridge. The Gazebo world view is a separately managed client; stopping it leaves the server and /clock running."
             color: "#a8bac5"
             wrapMode: Text.WordWrap
         }
         RowLayout {
-            Button { text: "Start simulation"; onClicked: root.processManager.startSimulation(session.robot) }
-            Button { text: "Open Gazebo world view"; onClicked: root.processManager.startGazeboView() }
+            Button {
+                text: "Start simulation"
+                onClicked: {
+                    if (root.processManager.startSimulation(session.robot) && session.gazeboViewOnSimulationStart) {
+                        root.waitingForSimulationServer = true
+                        root.autoOpenAttempts = 0
+                        root.autoOpenTimedOut = false
+                        if (session.connectionState !== "Connected") session.connectToTarget()
+                    }
+                }
+            }
+            Button {
+                text: root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" ? "Close Gazebo world view" : "Open Gazebo world view"
+                enabled: root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" || session.simulationServerAvailable
+                onClicked: {
+                    if (root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting") root.processManager.stopProcess("Gazebo world view")
+                    else root.processManager.startGazeboView()
+                }
+            }
             Button { text: "Stop app processes"; onClicked: root.processManager.stopAll() }
+        }
+        Label {
+            Layout.fillWidth: true
+            text: session.simulationServerAvailable ? "Simulation server available (/clock publisher detected)" : (root.autoOpenTimedOut ? "Server was not confirmed by /clock within 60 seconds; Gazebo client was not started." : "Gazebo world view needs a confirmed /clock publisher. Connect to the simulation ROS domain.")
+            color: session.simulationServerAvailable ? "#45d6a8" : "#a8bac5"
+            wrapMode: Text.WordWrap
+        }
+        Timer {
+            id: autoOpenTimer
+            interval: 500
+            repeat: true
+            running: root.waitingForSimulationServer
+            onTriggered: {
+                if (session.simulationServerAvailable) {
+                    root.waitingForSimulationServer = false
+                    if (root.processState("Gazebo world view") !== "Running" && root.processState("Gazebo world view") !== "Starting") root.processManager.startGazeboView()
+                } else if (++root.autoOpenAttempts >= 120) {
+                    root.waitingForSimulationServer = false
+                    root.autoOpenTimedOut = true
+                }
+            }
         }
         Rectangle { Layout.fillWidth: true; height: 1; color: "#354752" }
         ScrollView {
@@ -78,4 +122,8 @@ Rectangle {
             elide: Text.ElideLeft
         }
     }
+
+    property bool waitingForSimulationServer: false
+    property int autoOpenAttempts: 0
+    property bool autoOpenTimedOut: false
 }

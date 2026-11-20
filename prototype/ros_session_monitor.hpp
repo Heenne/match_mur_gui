@@ -17,6 +17,7 @@ class RosSessionMonitor
 public:
   explicit RosSessionMonitor(const rclcpp::Node::SharedPtr & node, LogStore * logs = nullptr);
   QStringList diagnose(const QString & target, const QString & robot, const QString & mode, int domain);
+  bool simulationServerAvailable() const;
 
 private:
   rclcpp::Node::SharedPtr node_;

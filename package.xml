@@ -29,7 +29,7 @@
   <exec_depend>ewellix_interfaces</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
-  <exec_depend>mir_srvs</exec_depend>
+  <depend>mir_srvs</depend>
   <exec_depend>mur_control</exec_depend>
   <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>moveit_py</exec_depend>

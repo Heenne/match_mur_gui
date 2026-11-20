@@ -103,6 +103,11 @@ Item {
                         Panels.SimBaseJog { Layout.fillWidth: true; Layout.preferredHeight: 260; visible: session.mode === "Simulation" }
                         Panels.UrArmJog { Layout.fillWidth: true; Layout.preferredHeight: 610; controller: urArmJog; visible: session.mode === "Hardware" }
                         Panel { Layout.fillWidth: true; Layout.preferredHeight: 100; heading: "Robot controls are available in the hardware arm panel"; visible: session.mode !== "Simulation" && session.view !== "Robot" }
+                        Panels.MirHardwareControl {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 470
+                            visible: session.mode === "Hardware"
+                        }
                         Panels.GoalsPoses { Layout.fillWidth: true; Layout.preferredHeight: 440; goals: goalsPoses; sessionController: session }
                     }
                 }

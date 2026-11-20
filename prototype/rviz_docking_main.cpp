@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <chrono>
 #include <thread>
+#include <utility>
 
 #include <QApplication>
 #include <QDockWidget>
@@ -36,10 +37,11 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/executors/single_threaded_executor.hpp"
 #include "rviz_common/ros_integration/ros_node_abstraction.hpp"
+#include "rviz_common/config.hpp"
 #include "rviz_common/visualization_frame.hpp"
+#include "rviz_common/yaml_config_reader.hpp"
 #include "ros_session_monitor.hpp"
 #include "simulation_base_jog.hpp"
-#include "process_manager.hpp"
 #include "process_manager.hpp"
 #include "goals_poses.hpp"
 #include "std_msgs/msg/string.hpp"
@@ -141,6 +143,7 @@ class SessionController : public QObject
   Q_PROPERTY(QString visualization READ visualization NOTIFY changed)
   Q_PROPERTY(QString workspacePath READ workspacePath NOTIFY changed)
   Q_PROPERTY(QString configPath READ configPath NOTIFY changed)
+  Q_PROPERTY(bool useSimTime READ useSimTime NOTIFY changed)
   Q_PROPERTY(QString lastError READ lastError NOTIFY changed)
   Q_PROPERTY(QString view READ view NOTIFY changed)
   Q_PROPERTY(QString connectionState READ connectionState NOTIFY changed)
@@ -174,6 +177,58 @@ public:
   QString visualization() const { return value("visualization", "RViz"); }
   QString workspacePath() const { return value("workspacePath", ""); }
   QString configPath() const { return value("configPath", ""); }
+  QString rvizConfigPath(const QString & command_line_override) const
+  {
+    return command_line_override.trimmed().isEmpty() ? configPath().trimmed() : command_line_override.trimmed();
+  }
+  bool useSimTime() const { return mode() == "Simulation"; }
+  QString contextKey(const QString & command_line_override) const
+  {
+    return QString("%1|%2|%3|%4|%5|%6|%7")
+      .arg(preset(), mode(), target()).arg(rosDomain())
+      .arg(robot(), visualization(), rvizConfigPath(command_line_override));
+  }
+  bool validateRvizProfile(const QString & command_line_override, QString * error) const
+  {
+    if (mode() != "Simulation" && mode() != "Hardware") {
+      if (error) *error = QString("Selected profile '%1' has unavailable mode '%2'.")
+        .arg(preset(), mode());
+      return false;
+    }
+    if (visualization() != "RViz") {
+      if (error) *error = QString("Selected profile '%1' uses '%2'; RViz is unavailable for this visualization.")
+        .arg(preset(), visualization());
+      return false;
+    }
+    const auto path = rvizConfigPath(command_line_override);
+    if (path.isEmpty()) {
+      if (error) *error = QString("Selected profile '%1' has no RViz configuration. Set its RViz config path in Settings.")
+        .arg(preset());
+      return false;
+    }
+    const QFileInfo info(path);
+    QFile file(path);
+    if (!info.exists() || !info.isFile() || !info.isReadable() || !file.open(QIODevice::ReadOnly)) {
+      if (error) *error = QString("RViz configuration for profile '%1' is unavailable or unreadable: %2")
+        .arg(preset(), path);
+      return false;
+    }
+    const auto contents = file.readAll().trimmed();
+    if (contents.isEmpty()) {
+      if (error) *error = QString("RViz configuration for profile '%1' is empty: %2")
+        .arg(preset(), path);
+      return false;
+    }
+    rviz_common::Config parsed_config;
+    rviz_common::YamlConfigReader config_reader;
+    config_reader.readFile(parsed_config, path);
+    if (config_reader.error() || !parsed_config.mapGetChild("Visualization Manager").isValid()) {
+      if (error) *error = QString("RViz configuration for profile '%1' is invalid: missing Visualization Manager section (%2)")
+        .arg(preset(), config_reader.error() ? config_reader.errorMessage() : path);
+      return false;
+    }
+    return true;
+  }
   QString lastError() const { return last_error_; }
   QString view() const { return value("view", "Overview"); }
   QString connectionState() const { return connection_state_; }
@@ -484,6 +539,77 @@ bool run_portable_preset_contract_test()
     restored.lastError().contains("Unsupported or invalid");
 }
 
+bool run_rviz_session_contract_test()
+{
+  QTemporaryDir directory;
+  if (!directory.isValid()) return false;
+  const auto sim_path = directory.filePath("simulation.rviz");
+  const auto hardware_path = directory.filePath("hardware.rviz");
+  const auto override_path = directory.filePath("override.rviz");
+  const auto empty_path = directory.filePath("empty.rviz");
+  const auto invalid_path = directory.filePath("invalid.rviz");
+  for (const auto & path : {sim_path, hardware_path, override_path}) {
+    QFile config(path);
+    if (!config.open(QIODevice::WriteOnly) || config.write("Visualization Manager:\n") < 1) return false;
+  }
+  QFile empty(empty_path);
+  if (!empty.open(QIODevice::WriteOnly)) return false;
+  empty.close();
+  QFile invalid(invalid_path);
+  if (!invalid.open(QIODevice::WriteOnly) || invalid.write("not an RViz display config\n") < 1) return false;
+  invalid.close();
+
+  SessionController session;
+  QString error;
+  if (!session.saveProfile("Simulation view", "Simulation", "localhost", "mur620d", "RViz", "", sim_path, session.rosDomain()) ||
+    !session.useSimTime() || session.rvizConfigPath("") != sim_path ||
+    !session.validateRvizProfile("", &error) || !error.isEmpty()) return false;
+  const auto simulation_context = session.contextKey("");
+  if (session.rvizConfigPath(override_path) != override_path ||
+    !session.validateRvizProfile(override_path, &error)) return false;
+
+  if (!session.saveProfile("Hardware view", "Hardware", "robot-host", "mur620b", "RViz", "", hardware_path, session.rosDomain()) ||
+    session.useSimTime() || session.rvizConfigPath("") != hardware_path ||
+    !session.validateRvizProfile("", &error)) return false;
+  const auto hardware_context = session.contextKey("");
+  if (simulation_context == hardware_context) return false;
+  const auto hardware_host_context = session.contextKey("");
+  session.selectTarget("another-robot-host");
+  const auto alternate_host_context = session.contextKey("");
+  if (hardware_host_context == alternate_host_context) return false;
+  const auto previous_domain = session.rosDomain();
+  session.selectRosDomain(89);
+  const auto alternate_domain_context = session.contextKey("");
+  if (alternate_domain_context == alternate_host_context) return false;
+  session.selectRosDomain(previous_domain);
+
+  if (!session.saveProfile("Missing view", "Simulation", "localhost", "mur620d", "RViz", "", "", session.rosDomain()) ||
+    session.validateRvizProfile("", &error) || !error.contains("no RViz configuration")) return false;
+  if (!session.saveProfile("Empty view", "Hardware", "localhost", "mur620d", "RViz", "", empty_path, session.rosDomain()) ||
+    session.validateRvizProfile("", &error) || !error.contains("is empty")) return false;
+  if (!session.saveProfile("Invalid view", "Hardware", "localhost", "mur620d", "RViz", "", invalid_path, session.rosDomain()) ||
+    session.validateRvizProfile("", &error) || !error.contains("is invalid")) return false;
+  if (!session.saveProfile("Unsupported view", "Hardware", "localhost", "mur620d", "MuR data view", "", hardware_path, session.rosDomain()) ||
+    session.validateRvizProfile("", &error) || !error.contains("RViz is unavailable")) return false;
+
+  rclcpp::init(0, nullptr);
+  bool time_parameter_matches_profile = true;
+  for (const auto & profile : {std::pair<std::string, std::string>{"sim", "Simulation"},
+      {"hardware", "Hardware"}}) {
+    if (!session.saveProfile("Time source", QString::fromStdString(profile.second), "localhost",
+      "mur620d", "RViz", "", profile.first == "sim" ? sim_path : hardware_path,
+      session.rosDomain())) return false;
+    auto node = std::make_shared<rviz_common::ros_integration::RosNodeAbstraction>(
+      "rviz_time_contract_" + profile.first);
+    node->get_raw_node()->set_parameter(rclcpp::Parameter("use_sim_time", session.useSimTime()));
+    time_parameter_matches_profile = time_parameter_matches_profile &&
+      node->get_raw_node()->get_parameter("use_sim_time").as_bool() == session.useSimTime();
+  }
+  rclcpp::shutdown();
+  if (!time_parameter_matches_profile) return false;
+  return true;
+}
+
 bool run_remote_discovery_contract_test()
 {
   QTemporaryDir directory;
@@ -624,7 +750,7 @@ class PrototypeWindow : public QMainWindow
 {
 public:
   PrototypeWindow(const QString & config_path, const QString & context, const QString & qml_path)
-  : QMainWindow(), context_(context), config_path_(config_path), session_(new SessionController()),
+  : QMainWindow(), context_(context), config_override_(config_path), session_(new SessionController()),
     sim_base_jog_adapter_(std::make_shared<RosSimBaseJogAdapter>()),
     sim_base_jog_(new SimulationBaseJog(sim_base_jog_adapter_, this)),
     goals_poses_adapter_(std::make_shared<RosGoalsPosesAdapter>()),
@@ -658,10 +784,13 @@ public:
       });
     }
     connect(session_, &SessionController::changed, this, [this]() {
+      ensure_session_context();
       goals_poses_->setConnected(session_->connectionState() == "Connected" &&
         (session_->mode() == "Hardware" || session_->mode() == "Simulation"));
       setWindowTitle(QString("MuR Command Center · %1 · %2 · %3")
         .arg(session_->mode(), session_->preset(), session_->robot()));
+      if (rviz_dock_) rviz_dock_->setWindowTitle("Visualisierung · " + session_label());
+      if (logs_dock_) logs_dock_->setWindowTitle("Logs · " + session_label());
       statusBar()->showMessage(QString("%1 · %2 · %3 · %4 · No processes started")
         .arg(session_->target(), session_->robot(), session_->mode(), session_->connectionState()));
     });
@@ -671,11 +800,11 @@ public:
       "This dock is independent of RViz. Replace it with the session log view\n"
       "when the host shell is integrated into the MuR application.");
     log_view->setWordWrap(true);
-    auto * logs = new QDockWidget("Logs · " + context_, this);
-    logs->setObjectName("logsDock");
-    logs->setWidget(log_view);
-    logs->setAllowedAreas(Qt::AllDockWidgetAreas);
-    addDockWidget(Qt::BottomDockWidgetArea, logs);
+    logs_dock_ = new QDockWidget("Logs · " + session_label(), this);
+    logs_dock_->setObjectName("logsDock");
+    logs_dock_->setWidget(log_view);
+    logs_dock_->setAllowedAreas(Qt::AllDockWidgetAreas);
+    addDockWidget(Qt::BottomDockWidgetArea, logs_dock_);
 
     statusBar()->showMessage(QString("%1 · %2 · Disconnected · No processes started")
       .arg(session_->target(), session_->robot()));
@@ -688,15 +817,65 @@ public:
 
   void refresh_diagnosis()
   {
+    if (!ensure_session_context()) return;
     if (session_monitor_) {
-      session_->setDiagnostics(session_monitor_->diagnose(session_->target(), session_->robot(),
-        session_->mode(), session_->rosDomain()));
+      session_->setDiagnostics(session_diagnostics());
     }
+  }
+
+  QString session_context() const
+  {
+    return session_->contextKey(config_override_);
+  }
+
+  QString session_label() const
+  {
+    return QString("%1 · %2 · %3 · %4 · domain %5")
+      .arg(session_->mode(), session_->preset(), session_->target(), session_->robot())
+      .arg(session_->rosDomain());
+  }
+
+  QStringList session_diagnostics() const
+  {
+    auto diagnostics = session_monitor_->diagnose(session_->target(), session_->robot(),
+      session_->mode(), session_->rosDomain());
+    diagnostics.prepend(QString("RViz: profile %1 · config %2")
+      .arg(session_->preset(), session_->rvizConfigPath(config_override_)));
+    diagnostics.prepend(QString("Time source: %1")
+      .arg(session_->useSimTime() ? "simulation (/clock)" : "system time"));
+    return diagnostics;
+  }
+
+  bool ensure_session_context()
+  {
+    if (!pending_context_.isEmpty() && session_->connectionState() == "Connecting" &&
+      pending_context_ != session_context()) {
+      pending_context_.clear();
+      session_->setDiscoveryRoute(QString());
+      session_->setDiagnostics({"Session context changed before RViz connected; connect again to use the selected profile"});
+      session_->setConnectionState("Disconnected");
+      return false;
+    }
+    if (rviz_node_ && !connected_context_.isEmpty() && connected_context_ != session_context()) {
+      const auto old_context = connected_context_;
+      disconnect_ros();
+      session_->setDiagnostics({"Session context changed · RViz disconnected; connect to attach the selected profile",
+        QString("Previous RViz context: %1").arg(old_context)});
+      return false;
+    }
+    return true;
   }
 
   void connect_ros()
   {
     if (rviz_node_) return;
+    QString profile_error;
+    if (!session_->validateRvizProfile(config_override_, &profile_error)) {
+      session_->setDiagnostics({"RViz unavailable · " + profile_error,
+        "External processes were not started or stopped"});
+      session_->setConnectionState("Failed: " + profile_error);
+      return;
+    }
     const QString host = session_->target().trimmed();
     const int domain = session_->rosDomain();
     if (!valid_remote_host(host)) {
@@ -705,8 +884,13 @@ public:
       return;
     }
     session_->setConnectionState("Connecting");
+    pending_context_ = session_context();
     auto resolved = [this, host, domain](const QHostInfo & info) {
         if (session_->connectionState() != "Connecting") return;
+        if (pending_context_.isEmpty() || pending_context_ != session_context()) {
+          ensure_session_context();
+          return;
+        }
         QList<QHostAddress> addresses;
         for (const auto & address : info.addresses()) {
           if (address.protocol() == QAbstractSocket::IPv4Protocol) addresses.append(address);
@@ -744,6 +928,8 @@ public:
       ros_executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
       rviz_node_ = std::make_shared<rviz_common::ros_integration::RosNodeAbstraction>(
         "mur_rviz_docking_prototype");
+      rviz_node_->get_raw_node()->set_parameter(
+        rclcpp::Parameter("use_sim_time", session_->useSimTime()));
       sim_base_jog_adapter_->setNode(rviz_node_->get_raw_node());
       goals_poses_adapter_->setNode(rviz_node_->get_raw_node());
       goals_poses_->setConnected(session_->mode() == "Hardware" || session_->mode() == "Simulation");
@@ -754,7 +940,7 @@ public:
       frame->setSplashPath("");
       frame->setHideButtonVisibility(false);
       frame->initialize(rviz_node_);
-      rviz_dock_ = new QDockWidget("Visualisierung · " + context_, this);
+      rviz_dock_ = new QDockWidget("Visualisierung · " + session_label(), this);
       rviz_dock_->setObjectName("rvizVisualizationDock");
       rviz_dock_->setWidget(frame);
       rviz_dock_->setAllowedAreas(Qt::AllDockWidgetAreas);
@@ -764,12 +950,13 @@ public:
       connect(rviz_dock_, &QDockWidget::visibilityChanged, this, [this](bool visible) {
         if (visible) rviz_dock_->widget()->setFocus(Qt::OtherFocusReason);
       });
-      if (!config_path_.isEmpty()) frame->loadDisplayConfig(config_path_);
+      frame->loadDisplayConfig(session_->rvizConfigPath(config_override_));
       ros_spin_timer_.start(10);
       diagnosis_timer_.start(500);
+      connected_context_ = pending_context_.isEmpty() ? session_context() : pending_context_;
+      pending_context_.clear();
       session_->setConnectionState("Connected");
-      session_->setDiagnostics(session_monitor_->diagnose(session_->target(), session_->robot(),
-        session_->mode(), session_->rosDomain()));
+      session_->setDiagnostics(session_diagnostics());
     } catch (const std::exception & error) {
       session_monitor_.reset();
       ros_spin_timer_.stop();
@@ -785,6 +972,8 @@ public:
       sim_base_jog_adapter_->setNode({});
       goals_poses_adapter_->setNode({});
       goals_poses_->setConnected(false);
+      pending_context_.clear();
+      connected_context_.clear();
       if (rclcpp::ok()) rclcpp::shutdown();
       session_->setDiagnostics({QString("Connection failed · %1").arg(error.what()),
         "Host/network: DDS configuration completed; graph reachability is not confirmed",
@@ -811,6 +1000,8 @@ public:
     sim_base_jog_adapter_->setNode({});
     goals_poses_adapter_->setNode({});
     goals_poses_->setConnected(false);
+    pending_context_.clear();
+    connected_context_.clear();
     if (rclcpp::ok()) rclcpp::shutdown();
     session_->setDiscoveryRoute(QString());
     session_->setDiagnostics({"Disconnected · external ROS launches and processes were left running"});
@@ -827,7 +1018,9 @@ protected:
 
 private:
   QString context_;
-  QString config_path_;
+  QString config_override_;
+  QString pending_context_;
+  QString connected_context_;
   SessionController * session_;
   std::shared_ptr<RosSimBaseJogAdapter> sim_base_jog_adapter_;
   SimulationBaseJog * sim_base_jog_;
@@ -838,6 +1031,7 @@ private:
   std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> ros_executor_;
   std::unique_ptr<RosSessionMonitor> session_monitor_;
   QDockWidget * rviz_dock_{nullptr};
+  QDockWidget * logs_dock_{nullptr};
   QTimer ros_spin_timer_;
   QTimer diagnosis_timer_;
 };
@@ -864,6 +1058,8 @@ int main(int argc, char ** argv)
       // Exercises the public monitor output against a live in-process ROS graph.
     } else if (arguments[i] == "--contract-test-portable-presets") {
       // Exercises portable preset serialization through the session interface.
+    } else if (arguments[i] == "--contract-test-rviz-session") {
+      // Checks active-profile RViz selection, time source, and unavailable profile errors.
     } else if (arguments[i] == "--contract-test-sim-base-jog") {
       // Exercises hold-to-run behavior against an isolated fake ROS adapter.
     } else if (arguments[i] == "--contract-test-goals-poses") {
@@ -926,6 +1122,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Portable preset contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-rviz-session")) {
+    if (!run_rviz_session_contract_test()) {
+      qCritical("RViz session contract failed");
+      return 1;
+    }
+    qInfo("RViz session contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-sim-base-jog")) {

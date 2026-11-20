@@ -68,6 +68,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_session_shell test/test_session_shell.py)
   ament_add_pytest_test(test_remote_discovery_config test/test_remote_discovery_config.py)
   ament_add_pytest_test(test_process_manager test/test_process_manager.py)
+  ament_add_pytest_test(test_deb_package test/test_deb_package.py)
 endif()
 
 install(DIRECTORY prototype

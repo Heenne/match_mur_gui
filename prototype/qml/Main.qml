@@ -1,6 +1,7 @@
 import QtQuick 2.12
 import QtQuick.Controls 2.5
 import QtQuick.Layouts 1.12
+import QtQuick.Dialogs 1.3 as NativeDialogs
 
 Item {
     id: window
@@ -118,7 +119,21 @@ Item {
                 }
             }
             Panel { heading: "Logs" }
-            Panel { heading: "Settings" }
+            Rectangle {
+                color: "#1b2933"; radius: 12; border.color: "#2b3c47"
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 18; spacing: 12
+                    Label { text: "Profiles"; color: window.foreground; font.pixelSize: 20; font.bold: true }
+                    Label { Layout.fillWidth: true; text: "Edit and save the selected profile. Workspace and RViz paths are machine-local references."; color: window.muted; wrapMode: Text.WordWrap }
+                    RowLayout {
+                        Button { text: "Edit profile"; onClicked: { profileName.text = session.preset; profileMode.currentIndex = profileMode.model.indexOf(session.mode); profileTarget.text = session.target; profileRobot.text = session.robot; profileVisualization.currentIndex = profileVisualization.model.indexOf(session.visualization); profileWorkspace.text = session.workspacePath; profileConfig.text = session.configPath; profileDialog.open() } }
+                        Button { text: "Export preset…"; onClicked: exportDialog.open() }
+                        Button { text: "Import preset…"; onClicked: importFileDialog.open() }
+                    }
+                    Label { Layout.fillWidth: true; text: session.lastError; visible: session.lastError.length > 0; color: "#ff9b8e"; wrapMode: Text.WordWrap; Accessible.name: session.lastError }
+                    Item { Layout.fillHeight: true }
+                }
+            }
         }
         Label { text: "Disconnected · status is shown by text and color"; color: "#f0b44d"; Accessible.name: "Disconnected" }
     }
@@ -127,5 +142,41 @@ Item {
         anchors.centerIn: parent
         contentItem: TextField { id: presetName; placeholderText: "Preset name" }
         onAccepted: { if (presetName.text.trim().length) session.selectPreset(presetName.text.trim()); presetName.clear() }
+    }
+    Dialog {
+        id: profileDialog; title: "Edit profile"; modal: true; standardButtons: Dialog.Cancel
+        anchors.centerIn: parent; width: Math.min(window.width - 48, 520)
+        contentItem: ColumnLayout {
+            TextField { id: profileName; Layout.fillWidth: true; placeholderText: "Profile name" }
+            ComboBox { id: profileMode; Layout.fillWidth: true; model: ["Simulation", "Hardware"] }
+            TextField { id: profileTarget; Layout.fillWidth: true; placeholderText: "Target host" }
+            TextField { id: profileRobot; Layout.fillWidth: true; placeholderText: "Robot" }
+            ComboBox { id: profileVisualization; Layout.fillWidth: true; model: ["RViz", "MuR data view"] }
+            TextField { id: profileWorkspace; Layout.fillWidth: true; placeholderText: "Workspace path (machine-local)" }
+            TextField { id: profileConfig; Layout.fillWidth: true; placeholderText: "RViz config path (machine-local)" }
+            Button { text: "Save profile"; Layout.alignment: Qt.AlignRight; onClicked: if (session.saveProfile(profileName.text, profileMode.currentText, profileTarget.text, profileRobot.text, profileVisualization.currentText, profileWorkspace.text, profileConfig.text)) profileDialog.close() }
+        }
+    }
+    NativeDialogs.FileDialog {
+        id: exportDialog; title: "Export portable preset"; selectExisting: false
+        nameFilters: ["MuR preset bundle (*.murpreset.json)", "JSON files (*.json)"]
+        onAccepted: session.exportPreset(fileUrl)
+    }
+    NativeDialogs.FileDialog {
+        id: importFileDialog; title: "Choose portable preset"; selectExisting: true
+        nameFilters: ["MuR preset bundle (*.murpreset.json *.json)", "JSON files (*.json)"]
+        onAccepted: { importSource.text = fileUrl.toString(); importDialog.open() }
+    }
+    Dialog {
+        id: importDialog; title: "Import preset and map local paths"; modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        anchors.centerIn: parent; width: Math.min(window.width - 48, 520)
+        contentItem: ColumnLayout {
+            Label { Layout.fillWidth: true; text: "Map paths from the exporting machine to local files. Leave a field blank to import that reference as unassigned."; color: window.muted; wrapMode: Text.WordWrap }
+            TextField { id: importSource; Layout.fillWidth: true; visible: false }
+            TextField { id: workspaceMapping; Layout.fillWidth: true; placeholderText: "Local workspace path (optional)" }
+            TextField { id: configMapping; Layout.fillWidth: true; placeholderText: "Local RViz config path (optional)" }
+        }
+        onAccepted: session.importPreset(importSource.text, workspaceMapping.text, configMapping.text)
     }
 }

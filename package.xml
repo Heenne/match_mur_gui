@@ -30,6 +30,7 @@
   <exec_depend>moveit_py</exec_depend>
   <exec_depend>python3-pyqt5</exec_depend>
   <exec_depend>qml-module-qtquick-controls2</exec_depend>
+  <exec_depend>qml-module-qtquick-dialogs</exec_depend>
   <exec_depend>qml-module-qtquick-layouts</exec_depend>
   <exec_depend>qmlscene</exec_depend>
   <exec_depend>rclpy</exec_depend>

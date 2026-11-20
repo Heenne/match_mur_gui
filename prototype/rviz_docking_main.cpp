@@ -7,12 +7,18 @@
 #include <QApplication>
 #include <QDockWidget>
 #include <QFileInfo>
+#include <QFile>
+#include <QSaveFile>
 #include <QLabel>
 #include <QMainWindow>
 #include <QQmlContext>
 #include <QQuickWidget>
 #include <QShortcut>
 #include <QSettings>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QUrl>
+#include <QTemporaryDir>
 #include <QStringList>
 #include <QStatusBar>
 #include <QTimer>
@@ -36,6 +42,10 @@ class SessionController : public QObject
   Q_PROPERTY(int rosDomain READ rosDomain NOTIFY changed)
   Q_PROPERTY(QString robot READ robot NOTIFY changed)
   Q_PROPERTY(QString mode READ mode NOTIFY changed)
+  Q_PROPERTY(QString visualization READ visualization NOTIFY changed)
+  Q_PROPERTY(QString workspacePath READ workspacePath NOTIFY changed)
+  Q_PROPERTY(QString configPath READ configPath NOTIFY changed)
+  Q_PROPERTY(QString lastError READ lastError NOTIFY changed)
   Q_PROPERTY(QString view READ view NOTIFY changed)
   Q_PROPERTY(QString connectionState READ connectionState NOTIFY changed)
   Q_PROPERTY(QStringList diagnostics READ diagnostics NOTIFY changed)
@@ -60,6 +70,10 @@ public:
   int rosDomain() const { return qEnvironmentVariableIntValue("ROS_DOMAIN_ID"); }
   QString robot() const { return value("robot", "mur620d"); }
   QString mode() const { return value("mode", preset() == "Local simulation" ? "Simulation" : "Hardware"); }
+  QString visualization() const { return value("visualization", "RViz"); }
+  QString workspacePath() const { return value("workspacePath", ""); }
+  QString configPath() const { return value("configPath", ""); }
+  QString lastError() const { return last_error_; }
   QString view() const { return value("view", "Overview"); }
   QString connectionState() const { return connection_state_; }
   QStringList diagnostics() const { return diagnostics_; }
@@ -83,6 +97,9 @@ public slots:
     if (!settings_->contains(group + "view")) settings_->setValue(group + "view", "Overview");
     if (!settings_->contains(group + "target")) settings_->setValue(group + "target", "localhost");
     if (!settings_->contains(group + "robot")) settings_->setValue(group + "robot", "mur620d");
+    if (!settings_->contains(group + "visualization")) settings_->setValue(group + "visualization", "RViz");
+    if (!settings_->contains(group + "workspacePath")) settings_->setValue(group + "workspacePath", "");
+    if (!settings_->contains(group + "configPath")) settings_->setValue(group + "configPath", "");
     if (!settings_->contains(group + "mode")) {
       settings_->setValue(group + "mode", clean == "Local simulation" ? "Simulation" : "Hardware");
     }
@@ -95,6 +112,92 @@ public slots:
   void selectMode(const QString &mode)
   {
     if (mode == "Simulation" || mode == "Hardware") setValue("mode", mode);
+  }
+  Q_INVOKABLE bool saveProfile(const QString &name, const QString &mode, const QString &target,
+    const QString &robot, const QString &visualization, const QString &workspace_path,
+    const QString &config_path)
+  {
+    const auto clean_name = name.trimmed();
+    if (clean_name.isEmpty() || clean_name.contains('/') || clean_name.contains('\\') ||
+      (mode != "Simulation" && mode != "Hardware") || target.trimmed().isEmpty() ||
+      robot.trimmed().isEmpty() || (visualization != "RViz" && visualization != "MuR data view")) {
+      setError("Profile needs a name, Simulation or Hardware mode, target, robot, and a supported visualization.");
+      return false;
+    }
+    const auto group = QString("presets/%1/").arg(clean_name);
+    settings_->setValue(group + "mode", mode);
+    settings_->setValue(group + "target", target.trimmed());
+    settings_->setValue(group + "robot", robot.trimmed());
+    settings_->setValue(group + "visualization", visualization);
+    settings_->setValue(group + "workspacePath", workspace_path.trimmed());
+    settings_->setValue(group + "configPath", config_path.trimmed());
+    settings_->setValue("activePreset", clean_name);
+    settings_->sync();
+    clearError();
+    emit changed();
+    return true;
+  }
+  Q_INVOKABLE bool exportPreset(const QString &path)
+  {
+    QJsonObject profile;
+    profile.insert("name", preset());
+    profile.insert("mode", mode());
+    profile.insert("target", target());
+    profile.insert("robot", robot());
+    profile.insert("visualization", visualization());
+    profile.insert("requiresWorkspaceMapping", !workspacePath().trimmed().isEmpty());
+    profile.insert("requiresConfigMapping", !configPath().trimmed().isEmpty());
+    QJsonObject bundle;
+    bundle.insert("format", "mur-command-center-preset");
+    bundle.insert("version", 1);
+    bundle.insert("profile", profile);
+    QSaveFile file(QUrl(path).isLocalFile() ? QUrl(path).toLocalFile() : path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+      setError(QString("Could not write preset: %1").arg(file.errorString()));
+      return false;
+    }
+    const auto data = QJsonDocument(bundle).toJson(QJsonDocument::Indented);
+    if (file.write(data) != data.size() || !file.commit()) {
+      setError(QString("Could not write preset: %1").arg(file.errorString()));
+      return false;
+    }
+    clearError();
+    return true;
+  }
+  Q_INVOKABLE bool importPreset(const QString &path, const QString &workspace_mapping,
+    const QString &config_mapping)
+  {
+    QFile file(QUrl(path).isLocalFile() ? QUrl(path).toLocalFile() : path);
+    if (!file.open(QIODevice::ReadOnly)) {
+      setError(QString("Could not read preset: %1").arg(file.errorString()));
+      return false;
+    }
+    QJsonParseError parse_error;
+    const auto document = QJsonDocument::fromJson(file.readAll(), &parse_error);
+    if (parse_error.error != QJsonParseError::NoError || !document.isObject()) {
+      setError(QString("Invalid preset JSON: %1").arg(parse_error.errorString()));
+      return false;
+    }
+    const auto bundle = document.object();
+    const auto profile = bundle.value("profile").toObject();
+    const auto name = profile.value("name").toString().trimmed();
+    const auto mode = profile.value("mode").toString();
+    const auto target = profile.value("target").toString().trimmed();
+    const auto robot = profile.value("robot").toString().trimmed();
+    const auto visualization = profile.value("visualization").toString();
+    if (bundle.value("format").toString() != "mur-command-center-preset" ||
+      bundle.value("version").toInt(-1) != 1 || name.isEmpty() ||
+      (mode != "Simulation" && mode != "Hardware") || target.isEmpty() || robot.isEmpty() ||
+      (visualization != "RViz" && visualization != "MuR data view") ||
+      !profile.value("requiresWorkspaceMapping").isBool() ||
+      !profile.value("requiresConfigMapping").isBool()) {
+      setError("Unsupported or invalid preset bundle. Expected version 1 with a complete profile.");
+      return false;
+    }
+    // Bundles contain only mapping-required flags; machine-local absolute paths never leave this host.
+    const auto workspace = profile.value("requiresWorkspaceMapping").toBool() ? workspace_mapping.trimmed() : QString();
+    const auto config = profile.value("requiresConfigMapping").toBool() ? config_mapping.trimmed() : QString();
+    return saveProfile(name, mode, target, robot, visualization, workspace, config);
   }
   void selectView(const QString &view)
   {
@@ -112,6 +215,8 @@ signals:
   void disconnectRequested();
 
 private:
+  void setError(const QString &error) { last_error_ = error; emit changed(); }
+  void clearError() { last_error_.clear(); }
   QString key(const QString &field) const { return QString("presets/%1/%2").arg(preset(), field); }
   QString value(const QString &field, const QString &fallback) const
   {
@@ -125,6 +230,7 @@ private:
   }
   std::unique_ptr<QSettings> settings_;
   QString connection_state_{"Disconnected"};
+  QString last_error_;
   QStringList diagnostics_{"Not connected · choose Connect to inspect the existing ROS graph"};
 };
 
@@ -208,6 +314,54 @@ bool run_ros_session_monitor_contract_test()
   executor.remove_node(fixture);
   rclcpp::shutdown();
   return passed;
+}
+
+bool run_portable_preset_contract_test()
+{
+  QTemporaryDir directory;
+  if (!directory.isValid()) return false;
+  const auto bundle_path = directory.filePath("profile.murpreset.json");
+  const auto invalid_path = directory.filePath("invalid.json");
+  {
+    SessionController session;
+    if (!session.saveProfile("Portable lab", "Hardware", "lab-host", "mur620b",
+      "MuR data view", "/old/workspace", "/old/config.rviz")) return false;
+    session.selectView("Logs");
+    if (!session.exportPreset(bundle_path)) return false;
+    QFile exported(bundle_path);
+    if (!exported.open(QIODevice::ReadOnly)) return false;
+    QJsonParseError error;
+    const auto exported_bytes = exported.readAll();
+    const auto document = QJsonDocument::fromJson(exported_bytes, &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) return false;
+    const auto bundle = document.object();
+    const auto profile = bundle.value("profile").toObject();
+    if (bundle.value("version").toInt() != 1 || profile.value("name").toString() != "Portable lab" ||
+      profile.value("mode").toString() != "Hardware" ||
+      profile.value("visualization").toString() != "MuR data view" ||
+      profile.contains("view") || profile.contains("lastView") || profile.contains("logFilter") ||
+      profile.contains("workspacePath") || profile.contains("configPath") ||
+      !profile.value("requiresWorkspaceMapping").toBool() ||
+      !profile.value("requiresConfigMapping").toBool() ||
+      exported_bytes.contains("/old/workspace") || exported_bytes.contains("/old/config.rviz") ||
+      profile.contains("password") || bundle.contains("credentials")) return false;
+    session.saveProfile("Temporary", "Simulation", "localhost", "mur620d", "RViz", "", "");
+    if (!session.importPreset(bundle_path, "/new/workspace", "/new/config.rviz") ||
+      session.preset() != "Portable lab" || session.mode() != "Hardware" ||
+      session.target() != "lab-host" || session.robot() != "mur620b" ||
+      session.visualization() != "MuR data view" || session.workspacePath() != "/new/workspace" ||
+      session.configPath() != "/new/config.rviz") return false;
+    if (!session.importPreset(bundle_path, "", "") || !session.workspacePath().isEmpty() ||
+      !session.configPath().isEmpty()) return false;
+    if (session.importPreset(directory.filePath("missing.json"), "", "") || session.lastError().isEmpty()) return false;
+  }
+  QFile invalid(invalid_path);
+  if (!invalid.open(QIODevice::WriteOnly)) return false;
+  invalid.write("{\"format\":\"mur-command-center-preset\",\"version\":99}");
+  invalid.close();
+  SessionController restored;
+  return !restored.importPreset(invalid_path, "", "") &&
+    restored.lastError().contains("Unsupported or invalid");
 }
 
 class PrototypeWindow : public QMainWindow
@@ -374,6 +528,8 @@ int main(int argc, char ** argv)
       // Exercised below before the GUI/ROS host is created.
     } else if (arguments[i] == "--contract-test-ros-session-monitor") {
       // Exercises the public monitor output against a live in-process ROS graph.
+    } else if (arguments[i] == "--contract-test-portable-presets") {
+      // Exercises portable preset serialization through the session interface.
     } else if (arguments[i] == "--context" && i + 1 < arguments.size()) {
       context = arguments[++i];
     } else if (arguments[i] == "--help" || arguments[i] == "-h") {
@@ -420,6 +576,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("ROS session monitor contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-portable-presets")) {
+    if (!run_portable_preset_contract_test()) {
+      qCritical("Portable preset contract failed");
+      return 1;
+    }
+    qInfo("Portable preset contract passed");
     return 0;
   }
   PrototypeWindow window(config_path, context, qml_path);

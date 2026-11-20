@@ -8,17 +8,13 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_prototype_contains_three_workflows_and_shared_session_context():
+def test_command_center_qml_uses_persistent_session_and_disconnected_status():
     qml = (ROOT / "prototype/qml/Main.qml").read_text()
-    for variant in ("Trial field", "Development", "Split work"):
-        assert variant in qml
-    for context in ("Simulation", "Hardware", "Local simulation", "mur620d", "ROS 2", "Domain 42"):
-        assert context in qml
-    for status in ("Connected", "Running", "Warning", "Base online", "Left arm ready"):
-        assert status in qml
-    assert "Controller discovery delayed" in qml
-    assert "gazebo.log" in qml
-    assert "bringup.log" in qml
+    for binding in ("session.preset", "session.target", "session.robot", "session.view"):
+        assert binding in qml
+    assert 'label: "Disconnected"' in qml
+    assert "Key_1" in qml and "selectPage" in qml
+    assert "New preset" in qml
 
 
 def test_qml_engine_loads_prototype():

@@ -53,6 +53,7 @@ Rectangle {
                                 Label { text: modelData.exitCode >= 0 ? "exit " + modelData.exitCode : ""; color: "#a8bac5" }
                                 Item { Layout.fillWidth: true }
                                 Button { text: "Stop"; enabled: modelData.state === "Running" || modelData.state === "Starting"; onClicked: root.processManager.stopProcess(modelData.name) }
+                                Button { text: "Open log"; onClicked: { logs.showSource(root.processManager.logSource(modelData.name)); logs.raiseDock() } }
                             }
                             TextArea {
                                 Layout.fillWidth: true

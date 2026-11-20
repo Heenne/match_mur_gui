@@ -51,6 +51,7 @@
 #include "mocap_controller.hpp"
 #include "ur_arm_jog.hpp"
 #include "hardware_status.hpp"
+#include "hardware_start.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "std_msgs/msg/float32.hpp"
 #include "sensor_msgs/msg/battery_state.hpp"
@@ -736,6 +737,123 @@ bool run_hardware_status_contract_test()
   return stale;
 }
 
+class FakeHardwareStartAdapter final : public HardwareStartAdapter
+{
+public:
+  HardwarePreflightResult preflight;
+  int preflight_calls{0};
+  int launch_calls{0};
+  int sync_calls{0};
+  int build_calls{0};
+  HardwareStartConfig last_config;
+
+  void runPreflight(const HardwareStartConfig & config, PreflightCallback callback) override
+  {
+    ++preflight_calls;
+    last_config = config;
+    callback(preflight);
+  }
+  void startHardware(const HardwareStartConfig & config, ActionCallback callback) override
+  {
+    ++launch_calls;
+    last_config = config;
+    callback({true, "Fake launch accepted"});
+  }
+  void syncSource(const HardwareStartConfig & config, ActionCallback callback) override
+  {
+    ++sync_calls;
+    last_config = config;
+    callback({true, "Fake source sync completed"});
+  }
+  void buildWorkspace(const HardwareStartConfig & config, ActionCallback callback) override
+  {
+    ++build_calls;
+    last_config = config;
+    callback({true, "Fake workspace build completed"});
+  }
+};
+
+bool run_hardware_start_contract_test()
+{
+  QTemporaryDir directory;
+  if (!directory.isValid()) return false;
+  const auto settings_path = directory.filePath("settings.ini");
+  auto adapter = std::make_shared<FakeHardwareStartAdapter>();
+  adapter->preflight.host_ready = true;
+  adapter->preflight.host_detail = "All required host checks passed";
+  adapter->preflight.arms.insert("UR10_l", {"Ready", "Dashboard safety confirmed"});
+  adapter->preflight.arms.insert("UR10_r", {"Ready", "Dashboard safety confirmed"});
+  HardwareStartController controller(adapter, nullptr, settings_path);
+
+  controller.setContext("Field test", "Hardware", "mur620d", 62, "mur620d", "Disconnected", "", "$HOME/colcon_ws");
+  controller.runPreflight();
+  if (controller.preflightReady() || controller.state() != "Blocked" || adapter->preflight_calls != 0) {
+    return false;
+  }
+  controller.setContext("Field test", "Hardware", "mur620d", 62, "mur620d", "Connected", "/tmp/source-ws", "$HOME/colcon_ws");
+  controller.setOption("launch_mir", true);
+  controller.setOption("launch_cameras", true);
+  controller.setOption("moveit_speed_percent", 35);
+
+  auto unsafe_adapter = std::make_shared<FakeHardwareStartAdapter>();
+  unsafe_adapter->preflight.host_ready = true;
+  unsafe_adapter->preflight.arms.insert("UR10_l", {"Ready", "Dashboard safety confirmed"});
+  // No reply for the right arm is an unknown safety state and must block launch.
+  HardwareStartController unsafe(unsafe_adapter, nullptr, settings_path);
+  unsafe.setContext("Unsafe test", "Hardware", "mur620d", 62, "mur620d", "Connected", "/tmp/source-ws", "$HOME/colcon_ws");
+  unsafe.runPreflight();
+  unsafe.startHardware();
+  if (unsafe.preflightReady() || unsafe_adapter->launch_calls != 0 || unsafe.state() != "Blocked") {
+    return false;
+  }
+
+  controller.runPreflight();
+  if (!controller.preflightReady() || controller.state() != "Ready" || adapter->preflight_calls != 1) {
+    return false;
+  }
+  controller.setContext("Field test", "Hardware", "mur620d", 62, "mur620d", "Disconnected", "/tmp/source-ws", "$HOME/colcon_ws");
+  controller.startHardware();
+  if (controller.preflightReady() || adapter->launch_calls != 0) return false;
+  controller.setContext("Field test", "Hardware", "mur620d", 62, "mur620d", "Connected", "/tmp/source-ws", "$HOME/colcon_ws");
+  controller.runPreflight();
+  controller.startHardware();
+  if (adapter->launch_calls != 1 || adapter->last_config.arms != QStringList({"UR10_l", "UR10_r"}) ||
+    !adapter->last_config.launch_mir || !adapter->last_config.launch_cameras ||
+    adapter->last_config.moveit_speed_percent != 35) return false;
+
+  controller.syncSource();
+  if (adapter->sync_calls != 1 || adapter->launch_calls != 1) return false;
+  controller.buildWorkspace();
+  if (adapter->build_calls != 1 || adapter->launch_calls != 1) return false;
+
+  auto restored_adapter = std::make_shared<FakeHardwareStartAdapter>();
+  HardwareStartController restored(restored_adapter, nullptr, settings_path);
+  restored.setContext("Field test", "Hardware", "mur620d", 62, "mur620d", "Connected", "/tmp/source-ws", "$HOME/colcon_ws");
+  if (!restored.options().value("launch_mir").toBool() ||
+    !restored.options().value("launch_cameras").toBool() ||
+    restored.options().value("moveit_speed_percent").toInt() != 35) return false;
+
+  const auto fake_ssh = qEnvironmentVariable("MUR_FAKE_HARDWARE_SSH");
+  if (!fake_ssh.isEmpty()) {
+    SshHardwareStartAdapter ssh_adapter(nullptr, nullptr, fake_ssh);
+    HardwareStartConfig config;
+    config.preset = "Field test"; config.mode = "Hardware"; config.host = "lab-host";
+    config.robot = "mur620a"; config.remote_workspace = "$HOME/colcon_ws";
+    config.arms = QStringList() << "UR10_l" << "UR10_r";
+    bool completed = false;
+    HardwarePreflightResult result;
+    ssh_adapter.runPreflight(config, [&completed, &result](const HardwarePreflightResult & value) {
+      result = value; completed = true;
+    });
+    QElapsedTimer wait;
+    wait.start();
+    while (!completed && wait.elapsed() < 3000) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    if (!completed || !result.host_ready || result.arms.value("UR10_l").state != "Ready" ||
+      result.arms.value("UR10_r").state != "Unknown") return false;
+  }
+  return true;
+}
+
 bool run_portable_preset_contract_test()
 {
   QTemporaryDir directory;
@@ -1080,8 +1198,55 @@ bool run_remote_process_manager_contract_test()
     QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
     rows = manager.processes();
     if (rows.first().toMap().value("state").toString() == "Stopped") {
-      return manager.log().contains("Stop signal sent to app-owned remote run") &&
-             manager.log().contains("remote launch stopped");
+      if (!manager.log().contains("Stop signal sent to app-owned remote run") ||
+        !manager.log().contains("remote launch stopped")) {
+        qCritical("remote simulation stop output missing: %s", qPrintable(manager.log())); return false;
+      }
+      const auto stop_file = qEnvironmentVariable("MUR_FAKE_REMOTE_STOP_FILE");
+      if (stop_file.isEmpty() || !QFile::remove(stop_file)) {
+        qCritical("remote simulation stop marker could not be removed: %s exists=%d", qPrintable(stop_file), QFileInfo::exists(stop_file)); return false;
+      }
+      QVariantMap options{{"arm_l", false}, {"arm_r", true}, {"launch_mir", true},
+        {"launch_cameras", true}, {"integrated_controller", true}, {"use_ft_sensor", false},
+        {"require_wrench", true}, {"collision_avoidance", false}, {"collision_markers", true},
+        {"zero_admittance", true}, {"launch_moveit", true}};
+      const QVariantMap no_components{{"arm_l", false}, {"arm_r", false}, {"launch_mir", false}};
+      if (manager.startRemoteHardware("lab host", 87, "mur620a", "$HOME/colcon_ws", options) ||
+        manager.startRemoteHardware("lab-host", 233, "mur620a", "$HOME/colcon_ws", options) ||
+        manager.startRemoteHardware("lab-host", 87, "mur620a", "bad;path", options) ||
+        manager.startRemoteHardware("lab-host", 87, "mur620a", "$HOME/colcon_ws", no_components)) {
+        qCritical("remote hardware validation accepted invalid config"); return false;
+      }
+      if (!manager.startRemoteHardware("lab-host", 87, "mur620a", "$HOME/colcon_ws", options)) {
+        qCritical("remote hardware launch was rejected before SSH: log=%s", qPrintable(manager.log())); return false;
+      }
+      timer.restart();
+      bool hardware_running = false;
+      while (timer.elapsed() < 5000 && !hardware_running) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        rows = manager.processes();
+        for (const auto & row : rows) {
+          const auto map = row.toMap();
+          if (map.value("name").toString() == "Hardware · mur620a" &&
+            map.value("host").toString() == "lab-host" && map.value("state").toString() == "Running") {
+            hardware_running = true;
+          }
+        }
+      }
+      if (!hardware_running) { qCritical("fake hardware process did not run: %s", qPrintable(manager.log())); return false; }
+      manager.stopProcess("Hardware · mur620a");
+      timer.restart();
+      while (timer.elapsed() < 5000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        rows = manager.processes();
+        for (const auto & row : rows) {
+          const auto map = row.toMap();
+          if (map.value("name").toString() == "Hardware · mur620a" &&
+            map.value("state").toString() == "Stopped") return true;
+        }
+      }
+      qCritical("fake hardware process did not stop: %s", qPrintable(manager.log()));
+      return false;
     }
   }
   qCritical("remote run failed to stop safely: %s", qPrintable(manager.log()));
@@ -1122,6 +1287,11 @@ public:
     command_center->rootContext()->setContextProperty("processes", process_manager_);
     log_store_ = new LogStore(this);
     process_manager_->setLogStore(log_store_);
+    hardware_start_adapter_ = std::make_shared<SshHardwareStartAdapter>(process_manager_, log_store_);
+    hardware_start_ = new HardwareStartController(hardware_start_adapter_, this);
+    hardware_start_->setContext(session_->preset(), session_->mode(), session_->target(),
+      session_->rosDomain(), session_->robot(), session_->connectionState(), session_->workspacePath(), "");
+    command_center->rootContext()->setContextProperty("hardwareStart", hardware_start_);
     log_store_->append("ROS /rosout", "WARN",
       "Live ROS logs are unavailable until this session connects to a ROS graph.");
     log_panel_ = new LogPanel(log_store_);
@@ -1143,6 +1313,9 @@ public:
     }
     connect(session_, &SessionController::changed, this, [this]() {
       ensure_session_context();
+      if (hardware_start_) hardware_start_->setContext(session_->preset(), session_->mode(),
+        session_->target(), session_->rosDomain(), session_->robot(), session_->connectionState(),
+        session_->workspacePath(), "");
       mocap_->setRobot(session_->robot());
       ur_arm_jog_->setContext(session_->robot(), session_->mode(), session_context(),
         session_->connectionState() == "Connected");
@@ -1410,6 +1583,8 @@ private:
   MirHardwareControl * mir_hardware_control_;
   std::shared_ptr<RosGoalsPosesAdapter> goals_poses_adapter_;
   GoalsPoses * goals_poses_;
+  std::shared_ptr<SshHardwareStartAdapter> hardware_start_adapter_;
+  HardwareStartController * hardware_start_{nullptr};
   MocapController * mocap_;
   std::shared_ptr<RosUrArmJogAdapter> ur_arm_jog_adapter_;
   UrArmJog * ur_arm_jog_;
@@ -1447,6 +1622,8 @@ int main(int argc, char ** argv)
       // Exercises the public monitor output against a live in-process ROS graph.
     } else if (arguments[i] == "--contract-test-hardware-status") {
       // Exercises missing, current, and stale telemetry through an injected clock and message seam.
+    } else if (arguments[i] == "--contract-test-hardware-start") {
+      // Exercises safety-gated hardware start, profile persistence, and explicit sync/build actions via a fake adapter.
     } else if (arguments[i] == "--contract-test-portable-presets") {
       // Exercises portable preset serialization through the session interface.
     } else if (arguments[i] == "--contract-test-gazebo-preset") {
@@ -1525,6 +1702,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Hardware status contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-hardware-start")) {
+    if (!run_hardware_start_contract_test()) {
+      qCritical("Hardware start contract failed");
+      return 1;
+    }
+    qInfo("Hardware start contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-portable-presets")) {

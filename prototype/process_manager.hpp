@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QProcess>
 #include <QVariantList>
+#include <QVariantMap>
 
 class LogStore;
 
@@ -21,6 +22,8 @@ public:
   QString log() const { return log_; }
   Q_INVOKABLE bool startSimulation(const QString & robot);
   Q_INVOKABLE bool startRemoteSimulation(const QString & host, int ros_domain, const QString & robot);
+  Q_INVOKABLE bool startRemoteHardware(const QString & host, int ros_domain, const QString & robot,
+    const QString & remote_workspace, const QVariantMap & options);
   Q_INVOKABLE bool startGazeboView();
   Q_INVOKABLE bool startProcess(const QString & name, const QString & program,
     const QStringList & arguments);
@@ -51,6 +54,8 @@ private:
     QProcess * stop_process{};
   };
   void appendOutput(ManagedProcess * managed, const QByteArray & bytes, bool stderr_stream);
+  bool startRemoteOwnedProcess(const QString & name, const QString & host, int ros_domain,
+    const QString & shell_command, const QString & start_log);
   void setState(ManagedProcess * managed, const QString & state);
   void appendLog(const QString & line);
   QHash<QString, ManagedProcess *> managed_;

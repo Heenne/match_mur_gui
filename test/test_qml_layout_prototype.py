@@ -12,3 +12,18 @@ def test_command_center_qml_uses_persistent_session_and_disconnected_status():
     assert "session.connectionState" in qml
     assert "Key_1" in qml and "selectPage" in qml
     assert "New preset" in qml
+
+
+def test_mocap_is_an_optional_session_view_with_explicit_bridge_ownership():
+    qml = (ROOT / "prototype/qml/Main.qml").read_text()
+    panel = (ROOT / "prototype/qml/MocapPanel.qml").read_text()
+    assert '"Mocap"' in qml
+    assert "Panels.MocapPanel" in qml
+    for binding in (
+        "controller.poseStatus", "controller.poseFrame", "controller.dataAgeSeconds",
+        "controller.frequencyHz", "controller.mapStatus", "controller.freezeStatus",
+        "controller.bridgeState", "controller.startBridge()", "controller.stopBridge()",
+        "controller.setMapOutput(true)", "controller.setFrozen(!root.controller.frozen)",
+    ):
+        assert binding in panel
+    assert "app-owned" in panel and "external" in panel

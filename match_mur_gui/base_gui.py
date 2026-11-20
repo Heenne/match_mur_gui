@@ -33,6 +33,7 @@ from match_mur_gui.alignment import plane_alignment, plane_alignments
 from match_mur_gui.ros_discovery import configure_ros_discovery
 from match_mur_gui.processes import stop_ros_process
 from match_mur_gui.jog_commands import cartesian_twist
+from match_mur_gui.gazebo_client import gazebo_client_command
 
 
 if not os.environ.get("WS"):
@@ -2368,6 +2369,9 @@ class MurBaseGui(QtWidgets.QMainWindow):
             self.add_action_button("Stop Managed Processes", self.stop_managed_processes, section="General"),
         ]
         self.connect_button = general_buttons[0]
+        self.gazebo_client_button = self.add_action_button(
+            "Open Gazebo World View", self.toggle_gazebo_client, section="General"
+        )
         self.update_connect_button()
 
         self.add_action_button("MiR Jog", self.open_mir_jog, section="MiR")
@@ -3197,6 +3201,25 @@ class MurBaseGui(QtWidgets.QMainWindow):
         self.processes[name] = process
         self.append_log(f"[{name}] $ {command}")
         process.start("bash", ["-lc", command])
+
+    def toggle_gazebo_client(self):
+        """Open or close only the GUI client; it never owns or stops the server."""
+        name = "gazebo_client"
+        process = self.processes.get(name)
+        if process is not None and process.state() != QtCore.QProcess.NotRunning:
+            self.append_log("[gui] closing GUI-owned Gazebo world view")
+            process.terminate()
+            if not process.waitForFinished(1500):
+                process.kill()
+                process.waitForFinished(1000)
+            self.gazebo_client_button.setText("Open Gazebo World View")
+            return
+        command = "exec " + shlex.join(gazebo_client_command())
+        self.start_process(name, command, on_finished=self._gazebo_client_finished)
+        self.gazebo_client_button.setText("Close Gazebo World View")
+
+    def _gazebo_client_finished(self, _exit_code, _exit_status):
+        self.gazebo_client_button.setText("Open Gazebo World View")
 
     def start_captured_process(self, name, command, on_finished, env=None):
         if name in self.processes and self.processes[name].state() != QtCore.QProcess.NotRunning:

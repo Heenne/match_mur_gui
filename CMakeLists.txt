@@ -31,6 +31,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_mir_jog test/test_mir_jog.py)
   ament_add_pytest_test(test_localization_selection test/test_localization_selection.py)
   ament_add_pytest_test(test_qml_layout_prototype test/test_qml_layout_prototype.py)
+  ament_add_pytest_test(test_gazebo_client test/test_gazebo_client.py)
 endif()
 
 install(DIRECTORY prototype

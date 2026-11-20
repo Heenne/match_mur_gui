@@ -18,6 +18,9 @@ Rectangle {
         }
         return "Stopped"
     }
+    function isLocalTarget() {
+        return session.target === "localhost" || session.target === "127.0.0.1" || session.target === "::1"
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -27,7 +30,7 @@ Rectangle {
         Label { text: "Processes"; color: "#f2f6f8"; font.pixelSize: 20; font.bold: true }
         Label {
             Layout.fillWidth: true
-            text: session.target === "localhost" || session.target === "127.0.0.1"
+            text: root.isLocalTarget()
                   ? "Start the local MuR620 simulation in one action. Gazebo can run headless; its world view is a separate client."
                   : "Start the MuR620 simulation over SSH on " + session.target + ". The remote ROS 2 Jazzy workspace must be available in a login shell; SSH keys or an agent must allow non-interactive access."
             color: "#a8bac5"
@@ -35,10 +38,10 @@ Rectangle {
         }
         RowLayout {
             Button {
-                text: session.target === "localhost" || session.target === "127.0.0.1" ? "Start simulation" : "Start remote simulation"
+                text: root.isLocalTarget() ? "Start simulation" : "Start remote simulation"
                 enabled: session.mode === "Simulation"
                 onClicked: {
-                    if (session.target === "localhost" || session.target === "127.0.0.1") {
+                    if (root.isLocalTarget()) {
                         if (root.processManager.startSimulation(session.robot) && session.gazeboViewOnSimulationStart) {
                             root.waitingForSimulationServer = true
                             root.autoOpenAttempts = 0
@@ -52,7 +55,7 @@ Rectangle {
             }
             Button {
                 text: root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" ? "Close Gazebo world view" : "Open Gazebo world view"
-                enabled: (session.target === "localhost" || session.target === "127.0.0.1") &&
+                enabled: root.isLocalTarget() &&
                          (root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" || session.simulationServerAvailable)
                 onClicked: {
                     if (root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting") root.processManager.stopProcess("Gazebo world view")

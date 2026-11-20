@@ -22,7 +22,8 @@ def ssh_reachable(address):
         return False
 
 
-def configure_ros_discovery(hosts, directory, *, environ=None, resolver=None, reachable=None):
+def configure_ros_discovery(hosts, directory, *, environ=None, resolver=None, reachable=None,
+                            direct_hosts=None):
     """Add explicit peer ports while preserving operator-supplied DDS settings.
 
     A plain ROS_STATIC_PEERS address does not discover all participants in our
@@ -32,6 +33,7 @@ def configure_ros_discovery(hosts, directory, *, environ=None, resolver=None, re
     env = os.environ if environ is None else environ
     resolver = resolve_ipv4 if resolver is None else resolver
     reachable = ssh_reachable if reachable is None else reachable
+    direct_hosts = {host.strip() for host in (direct_hosts or ()) if host.strip()}
     env.setdefault('ROS_DOMAIN_ID', '62')
     if (env.get('ROS_LOCALHOST_ONLY') == '1'
             or env.get('ROS_AUTOMATIC_DISCOVERY_RANGE', '').upper() in ('LOCALHOST', 'OFF')):
@@ -69,7 +71,8 @@ def configure_ros_discovery(hosts, directory, *, environ=None, resolver=None, re
                 # Offline robot addresses can stall Fast DDS on repeated ARP
                 # attempts for every participant port. Connect itself also
                 # requires SSH; explicit extra DDS peers need not offer SSH.
-                if address in addresses or host.strip() in explicit_hosts or reachable(address):
+                if (address in addresses or host.strip() in explicit_hosts
+                        or host.strip() in direct_hosts or reachable(address)):
                     addresses.add(address)
                 else:
                     offline.append(host)
@@ -108,6 +111,10 @@ def configure_ros_discovery(hosts, directory, *, environ=None, resolver=None, re
     for key in profile_keys:
         env[key] = str(destination)
     detail = f'DDS: direct peers {", ".join(sorted(addresses))}, domain {domain}'
+    route = 'direct peer route'
+    if direct_hosts:
+        route += f' for {", ".join(sorted(direct_hosts))}'
+    detail += f'; route: {route}'
     if unresolved:
         detail += f'; unresolved hosts: {", ".join(unresolved)}'
     if offline:

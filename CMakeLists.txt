@@ -30,6 +30,8 @@ add_executable(mur_rviz_docking_prototype
   prototype/ros_session_monitor.cpp
   prototype/hardware_status.cpp
   prototype/hardware_status.hpp
+  prototype/hardware_start.cpp
+  prototype/hardware_start.hpp
   prototype/process_manager.cpp
   prototype/log_store.cpp
   prototype/log_panel.cpp
@@ -69,6 +71,8 @@ if(BUILD_TESTING)
   set_tests_properties(mocap_monitor_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME hardware_status_behavior COMMAND mur_rviz_docking_prototype --contract-test-hardware-status)
   set_tests_properties(hardware_status_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_test(NAME hardware_start_behavior COMMAND mur_rviz_docking_prototype --contract-test-hardware-start)
+  set_tests_properties(hardware_start_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_cartesian_startup test/test_cartesian_startup.py)
   ament_add_pytest_test(test_cartesian_jog test/test_cartesian_jog.py)
@@ -88,6 +92,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_remote_discovery_config test/test_remote_discovery_config.py)
   ament_add_pytest_test(test_process_manager test/test_process_manager.py)
   ament_add_pytest_test(test_log_panel test/test_log_panel.py)
+  ament_add_pytest_test(test_hardware_start test/test_hardware_start.py)
   ament_add_pytest_test(test_mir_hardware_control_ui test/test_mir_hardware_control_ui.py)
   ament_add_pytest_test(test_deb_package test/test_deb_package.py)
 endif()

@@ -26,12 +26,11 @@ QString shell_quote(const QString & value)
   return "'" + escaped + "'";
 }
 
-QString remote_simulation_command(int domain, const QString & robot, const QString & token)
+QString remote_owned_command(int domain, const QString & shell_command, const QString & token)
 {
   const auto inner = QString("printf '__MUR_GUI_PID__=%s\\n' \"$$\"; "
-    "export MUR_GUI_RUN_ID=%1; exec ros2 launch mur_launch_sim mur620.launch.py "
-    "robot_name:=%2 include_gz:=true gazebo_gui:=false launch_rviz:=false")
-    .arg(shell_quote(token), shell_quote(robot));
+    "export MUR_GUI_RUN_ID=%1; exec bash -lc %2")
+    .arg(shell_quote(token), shell_quote(shell_command));
   const auto script = QString("export ROS_DOMAIN_ID=%1; exec setsid --fork --wait bash -c %2")
     .arg(domain).arg(shell_quote(inner));
   return "bash -lc " + shell_quote(script);
@@ -103,11 +102,80 @@ bool ProcessManager::startRemoteSimulation(const QString & host, int ros_domain,
   const auto trimmed_host = host.trimmed();
   if (!valid_host.match(trimmed_host).hasMatch() || trimmed_host == "localhost" ||
     ros_domain < 0 || ros_domain > 232 || !valid_robot.match(robot).hasMatch()) return false;
-  auto * managed = managed_.value("Remote MUR620 simulation", nullptr);
+  const auto command = QString("ros2 launch mur_launch_sim mur620.launch.py robot_name:=%1 "
+    "include_gz:=true gazebo_gui:=false launch_rviz:=false").arg(shell_quote(robot));
+  return startRemoteOwnedProcess("Remote MUR620 simulation", trimmed_host, ros_domain,
+    command, QString("Starting remote MuR simulation on %1 · domain %2 · robot %3")
+      .arg(trimmed_host).arg(ros_domain).arg(robot));
+}
+
+bool ProcessManager::startRemoteHardware(const QString & host, int ros_domain, const QString & robot,
+  const QString & remote_workspace, const QVariantMap & options)
+{
+  static const QRegularExpression valid_host("^[A-Za-z0-9][A-Za-z0-9.-]*$");
+  static const QRegularExpression valid_robot("^[A-Za-z][A-Za-z0-9_]*$");
+  static const QRegularExpression valid_path("^(\\$HOME|~|/[A-Za-z0-9_./-]+)(/[A-Za-z0-9_./-]*)?$");
+  const auto trimmed_host = host.trimmed();
+  const auto workspace = remote_workspace.trimmed().isEmpty() ? "$HOME/colcon_ws" : remote_workspace.trimmed();
+  if (!valid_host.match(trimmed_host).hasMatch() || trimmed_host == "localhost" ||
+    ros_domain < 0 || ros_domain > 232 || !valid_robot.match(robot).hasMatch() ||
+    !valid_path.match(workspace).hasMatch()) return false;
+  QStringList arms;
+  if (options.value("arm_l", false).toBool()) arms << "UR10_l";
+  if (options.value("arm_r", false).toBool()) arms << "UR10_r";
+  if (arms.isEmpty() && !options.value("launch_mir", false).toBool()) return false;
+  QStringList args{
+    "robot_name:=" + robot, "robot_profile:=" + robot,
+    QString("launch_ur_r:=%1").arg(options.value("arm_r", false).toBool() ? "true" : "false"),
+    QString("launch_ur_l:=%1").arg(options.value("arm_l", false).toBool() ? "true" : "false"),
+    QString("launch_mir:=%1").arg(options.value("launch_mir", false).toBool() ? "true" : "false"),
+    QString("launch_mir_cameras:=%1").arg(options.value("launch_cameras", false).toBool() ? "true" : "false"),
+    QString("integrated_controller_enable_collision_avoidance:=%1").arg(options.value("collision_avoidance", true).toBool() ? "true" : "false"),
+    QString("integrated_controller_publish_collision_markers:=%1").arg(options.value("collision_markers", false).toBool() ? "true" : "false"),
+    QString("launch_moveit:=%1").arg(options.value("launch_moveit", true).toBool() ? "true" : "false"),
+    "launch_bms:=true", "bms_can_interface:=can0", "bms_can_bitrate:=250000",
+    "auto_switch_moveit_controllers:=true", "launch_moveit_rviz:=false"};
+  if (options.value("zero_admittance", false).toBool()) {
+    args << "integrated_controller_admittance:=0.0 0.0 0.0 0.0 0.0 0.0"
+      << "integrated_controller_wrench_twist_gain:=0.0 0.0 0.0 0.0 0.0 0.0";
+  }
+  if (options.value("integrated_controller", true).toBool()) {
+    args << "use_integrated_cartesian_admittance_controller:=true"
+      << "integrated_controller_initial_active:=false" << "activate_joint_controller:=false"
+      << QString("integrated_controller_use_ft_sensor:=%1").arg(options.value("use_ft_sensor", true).toBool() ? "true" : "false")
+      << QString("integrated_controller_require_wrench:=%1").arg(options.value("require_wrench", false).toBool() ? "true" : "false")
+      << "launch_integrated_cartesian_move_action:=true"
+      << "launch_arm_velocity_safety:=false" << "launch_jparse_idk:=false";
+  } else {
+    args << "use_integrated_cartesian_admittance_controller:=false";
+  }
+  QString workspace_expression = shell_quote(workspace);
+  if (workspace.startsWith("$HOME")) workspace_expression = "\"${HOME}" + workspace.mid(5) + "\"";
+  else if (workspace.startsWith("~")) workspace_expression = "\"${HOME}" + workspace.mid(1) + "\"";
+  QStringList quoted_args;
+  for (const auto & arg : args) quoted_args << shell_quote(arg);
+  QString command = QString("workspace=%1; repo=\"$workspace/src/match_mobile_robotics_jazzy\"; "
+    "export WS=\"$workspace\" REPO=\"$repo\" ROS_DOMAIN_ID=%2 "
+    "ROBOT_PROFILE=%3 BUILD_BEFORE_LAUNCH=false CLEAN_START=false "
+    "MUR_REQUIRE_HOST_PREFLIGHT=true MUR_CHECK_UR_NETWORK=%4 MUR_UR_HOSTS=%5; "
+    "exec \"$repo/start_mur620_hardware_logged.sh\" %6")
+    .arg(workspace_expression).arg(ros_domain).arg(shell_quote(robot))
+    .arg(arms.isEmpty() ? "false" : "true").arg(shell_quote(arms.join(' ')))
+    .arg(quoted_args.join(' '));
+  return startRemoteOwnedProcess("Hardware · " + robot, trimmed_host, ros_domain, command,
+    QString("Starting hardware on %1 · robot %2 · arms %3 · MiR %4")
+      .arg(trimmed_host, robot, arms.isEmpty() ? "none" : arms.join(", "),
+        options.value("launch_mir", false).toBool() ? "enabled" : "disabled"));
+}
+
+bool ProcessManager::startRemoteOwnedProcess(const QString & process_name, const QString & host,
+  int ros_domain, const QString & shell_command, const QString & start_log)
+{
+  auto * managed = managed_.value(process_name, nullptr);
   if (managed && managed->process->state() != QProcess::NotRunning) return false;
   if (!managed) {
     managed = new ManagedProcess;
-    managed->name = "Remote MUR620 simulation";
+    managed->name = process_name;
     managed->remote = true;
     managed->process = new QProcess(this);
     managed_.insert(managed->name, managed);
@@ -140,13 +208,13 @@ bool ProcessManager::startRemoteSimulation(const QString & host, int ros_domain,
       if (error == QProcess::FailedToStart) {
         managed->exit_code = -1;
         setState(managed, "Failed");
-        appendLog(QString("Remote launch on %1 could not start: %2")
+        appendLog(QString("Remote process on %1 could not start: %2")
           .arg(managed->host, managed->process->errorString()));
       }
     });
   }
   managed->remote = true;
-  managed->host = trimmed_host;
+  managed->host = host;
   managed->run_token = QUuid::createUuid().toString(QUuid::WithoutBraces).remove('-');
   managed->remote_pid = -1;
   managed->remote_handshake.clear();
@@ -160,14 +228,11 @@ bool ProcessManager::startRemoteSimulation(const QString & host, int ros_domain,
   managed->process->setProcessEnvironment(environment);
   managed->process->setProgram(ssh_program_);
   managed->process->setArguments({"-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-      trimmed_host, remote_simulation_command(ros_domain, robot, managed->run_token)});
+      host, remote_owned_command(ros_domain, shell_command, managed->run_token)});
   managed->process->setProcessChannelMode(QProcess::SeparateChannels);
   setState(managed, "Connecting");
-  appendLog(QString("Starting remote MuR simulation on %1 · domain %2 · robot %3")
-    .arg(trimmed_host).arg(ros_domain).arg(robot));
-  if (log_store_) log_store_->append(managed->log_source, "INFO",
-    QString("Starting remote MuR simulation on %1 · domain %2 · robot %3")
-      .arg(trimmed_host).arg(ros_domain).arg(robot));
+  appendLog(start_log);
+  if (log_store_) log_store_->append(managed->log_source, "INFO", start_log);
   managed->process->start();
   return true;
 }

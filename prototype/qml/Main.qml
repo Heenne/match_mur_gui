@@ -101,6 +101,7 @@ Item {
                         width: parent.width
                         spacing: 12
                         Panels.SimBaseJog { Layout.fillWidth: true; Layout.preferredHeight: 260; visible: session.mode === "Simulation" }
+                        Panels.HardwareStart { Layout.fillWidth: true; Layout.preferredHeight: 680; workflow: hardwareStart; sessionController: session; processManager: processes; visible: session.mode === "Hardware" }
                         Panels.MirHardwareControl {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 470

@@ -9,6 +9,18 @@ Rectangle {
     radius: 12
     border.color: "#2b3c47"
 
+    function processState(name) {
+        for (var i = 0; i < processManager.processes.length; ++i) {
+            if (processManager.processes[i].name === name) return processManager.processes[i].state
+        }
+        return "Stopped"
+    }
+    function simulationServerReady() {
+        // The managed launch is authoritative for the local server before /clock
+        // becomes visible through a ROS monitor.
+        return session.simulationServerAvailable || processState("MUR620 simulation") === "Running"
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 18
@@ -17,14 +29,51 @@ Rectangle {
         Label { text: "Processes"; color: "#f2f6f8"; font.pixelSize: 20; font.bold: true }
         Label {
             Layout.fillWidth: true
-            text: "Start the local MuR620 simulation in one action. Gazebo GUI is disabled; each app-started process has its own status and captured output."
+            text: "Start the simulation server and its ROS bridge. The Gazebo world view is a separately managed client; stopping it leaves the server and /clock running."
             color: "#a8bac5"
             wrapMode: Text.WordWrap
         }
         RowLayout {
-            Button { text: "Start simulation"; onClicked: root.processManager.startSimulation(session.robot) }
-            Button { text: "Open Gazebo world view"; onClicked: root.processManager.startGazeboView() }
+            Button {
+                text: "Start simulation"
+                onClicked: {
+                    if (root.processManager.startSimulation(session.robot) && session.gazeboViewOnSimulationStart) {
+                        root.waitingForSimulationServer = true
+                        root.autoOpenAttempts = 0
+                        root.autoOpenTimedOut = false
+                    }
+                }
+            }
+            Button {
+                text: root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" ? "Close Gazebo world view" : "Open Gazebo world view"
+                enabled: root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" || root.simulationServerReady()
+                onClicked: {
+                    if (root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting") root.processManager.stopProcess("Gazebo world view")
+                    else root.processManager.startGazeboView()
+                }
+            }
             Button { text: "Stop app processes"; onClicked: root.processManager.stopAll() }
+        }
+        Label {
+            Layout.fillWidth: true
+            text: root.simulationServerReady() ? (session.simulationServerAvailable ? "Simulation server available (/clock publisher detected)" : "Simulation launch is running in this app; Gazebo client is managed separately") : (root.autoOpenTimedOut ? "Simulation server was not detected within 60 seconds; Gazebo client was not started." : "Gazebo world view needs a running simulation server. Connect to the simulation ROS domain to check /clock.")
+            color: root.simulationServerReady() ? "#45d6a8" : "#a8bac5"
+            wrapMode: Text.WordWrap
+        }
+        Timer {
+            id: autoOpenTimer
+            interval: 500
+            repeat: true
+            running: root.waitingForSimulationServer
+            onTriggered: {
+                if (root.simulationServerReady()) {
+                    root.waitingForSimulationServer = false
+                    if (root.processState("Gazebo world view") !== "Running" && root.processState("Gazebo world view") !== "Starting") root.processManager.startGazeboView()
+                } else if (++root.autoOpenAttempts >= 120) {
+                    root.waitingForSimulationServer = false
+                    root.autoOpenTimedOut = true
+                }
+            }
         }
         Rectangle { Layout.fillWidth: true; height: 1; color: "#354752" }
         ScrollView {
@@ -77,4 +126,8 @@ Rectangle {
             elide: Text.ElideLeft
         }
     }
+
+    property bool waitingForSimulationServer: false
+    property int autoOpenAttempts: 0
+    property bool autoOpenTimedOut: false
 }

@@ -8,12 +8,12 @@ ROS node and creates the RViz dock.
 
 Session state is stored by `QSettings` in the user's application config
 directory (`MATCH/MuRCommandCenter`), outside the source tree. Preset, target,
-robot, mode, and last view are stored per preset. A new preset opens Overview.
+robot, mode, Gazebo auto-open preference, and last view are stored per preset. A new preset opens Overview.
 Connection state is in memory only and always starts Disconnected. The shell
 does not start simulator or robot processes.
 
 Profiles can be edited and exported as versioned `.murpreset.json` bundles.
-Bundles include mode, target host, ROS domain, robot, visualization choice, and optional local
+Bundles include mode, target host, ROS domain, robot, visualization choice, Gazebo auto-open preference, and optional local
 workspace/RViz config references. Import maps these references to local paths;
 blank mappings explicitly leave the references unassigned. The portable
 allowlist omits the personal last view, layout, log filters, and credentials.
@@ -44,6 +44,11 @@ same active profile. The optional `--context` label is retained for the host's
 initial title. The GUI supports keys 1–7 to select Overview, Visualization,
 Robot, Processes, Diagnosis, Logs, and Settings.
 
-The host remains a prototype; ROS graph connection feedback is limited to the
-RViz node starting. No simulation or hardware launch process is wired to the
-shell.
+The Processes view starts the local MuR620 simulation and manages the Gazebo
+world view as a separate `gz sim -g` client. Starting or stopping the client
+does not stop the simulation server, `/clock`, ROS bridge, or their logs. The
+client can be opened later when the app-owned simulation launch is running or
+when `/clock` is discovered in the selected ROS domain. Client launch output and
+failure state appear in Processes. The app does not discover Gazebo servers
+through Gazebo Transport; a server outside the app must be visible through the
+selected ROS graph's `/clock` publisher before the client can be opened.

@@ -135,10 +135,17 @@ Item {
                     Label { text: "Profiles"; color: window.foreground; font.pixelSize: 20; font.bold: true }
                     Label { Layout.fillWidth: true; text: "Edit and save the selected profile. Workspace and RViz paths are machine-local references."; color: window.muted; wrapMode: Text.WordWrap }
                     RowLayout {
-                        Button { text: "Edit profile"; onClicked: { profileName.text = session.preset; profileMode.currentIndex = profileMode.model.indexOf(session.mode); profileTarget.text = session.target; profileDomain.text = String(session.rosDomain); profileRobot.text = session.robot; profileVisualization.currentIndex = profileVisualization.model.indexOf(session.visualization); profileWorkspace.text = session.workspacePath; profileConfig.text = session.configPath; profileDialog.open() } }
+                        Button { text: "Edit profile"; onClicked: { profileName.text = session.preset; profileMode.currentIndex = profileMode.model.indexOf(session.mode); profileTarget.text = session.target; profileDomain.text = String(session.rosDomain); profileRobot.text = session.robot; profileVisualization.currentIndex = profileVisualization.model.indexOf(session.visualization); profileWorkspace.text = session.workspacePath; profileConfig.text = session.configPath; profileGazeboOnStart.checked = session.gazeboViewOnSimulationStart; profileDialog.open() } }
                         Button { text: "Export preset…"; onClicked: exportDialog.open() }
                         Button { text: "Import preset…"; onClicked: importFileDialog.open() }
                     }
+                    CheckBox {
+                        text: "Gazebo world view on simulation start"
+                        checked: session.gazeboViewOnSimulationStart
+                        onToggled: session.setGazeboViewOnSimulationStart(checked)
+                        Accessible.name: text
+                    }
+                    Label { Layout.fillWidth: true; text: "Opens the separately managed client when the app's simulation launch is running or /clock is discovered in the selected ROS domain."; color: window.muted; wrapMode: Text.WordWrap }
                     Label { Layout.fillWidth: true; text: session.lastError; visible: session.lastError.length > 0; color: "#ff9b8e"; wrapMode: Text.WordWrap; Accessible.name: session.lastError }
                     Item { Layout.fillHeight: true }
                 }
@@ -164,7 +171,8 @@ Item {
             ComboBox { id: profileVisualization; Layout.fillWidth: true; model: ["RViz", "MuR data view"] }
             TextField { id: profileWorkspace; Layout.fillWidth: true; placeholderText: "Workspace path (machine-local)" }
             TextField { id: profileConfig; Layout.fillWidth: true; placeholderText: "RViz config path (machine-local)" }
-            Button { text: "Save profile"; Layout.alignment: Qt.AlignRight; onClicked: if (session.saveProfile(profileName.text, profileMode.currentText, profileTarget.text, profileRobot.text, profileVisualization.currentText, profileWorkspace.text, profileConfig.text, Number(profileDomain.text))) profileDialog.close() }
+            CheckBox { id: profileGazeboOnStart; text: "Gazebo world view on simulation start" }
+            Button { text: "Save profile"; Layout.alignment: Qt.AlignRight; onClicked: if (session.saveProfile(profileName.text, profileMode.currentText, profileTarget.text, profileRobot.text, profileVisualization.currentText, profileWorkspace.text, profileConfig.text, Number(profileDomain.text), profileGazeboOnStart.checked)) profileDialog.close() }
         }
     }
     NativeDialogs.FileDialog {

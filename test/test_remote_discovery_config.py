@@ -44,4 +44,3 @@ def test_existing_ros_domain_takes_precedence_over_remote_default(tmp_path):
     message = config.configure(tmp_path, environ=env, resolver=lambda _host: ["10.8.0.21"])
     assert env["ROS_DOMAIN_ID"] == "31"
     assert "domain 31" in message
-

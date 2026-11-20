@@ -62,3 +62,25 @@ def test_connect_action_exposes_live_ros_graph_diagnostics(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "ROS session monitor contract passed" in result.stderr + result.stdout
+
+
+def test_portable_presets_round_trip_and_remap_machine_paths(tmp_path):
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    environment = os.environ.copy()
+    environment["MUR_COMMAND_CENTER_SETTINGS"] = str(tmp_path / "session.ini")
+    environment["QT_QPA_PLATFORM"] = "offscreen"
+    result = subprocess.run(
+        [str(executable), "--contract-test-portable-presets"],
+        env=environment, text=True, capture_output=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Portable preset contract passed" in result.stderr + result.stdout
+
+
+def test_settings_exposes_profile_edit_and_portable_file_dialogs():
+    qml = (ROOT / "prototype/qml/Main.qml").read_text()
+    assert "Edit profile" in qml
+    assert "Save profile" in qml
+    assert "Export preset…" in qml
+    assert "Import preset…" in qml
+    assert "FileDialog" in qml

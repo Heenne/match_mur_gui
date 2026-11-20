@@ -12,6 +12,12 @@ robot, mode, and last view are stored per preset. A new preset opens Overview.
 Connection state is in memory only and always starts Disconnected. The shell
 does not start simulator or robot processes.
 
+Profiles can be edited and exported as versioned `.murpreset.json` bundles.
+Bundles include mode, target, robot, visualization choice, and optional local
+workspace/RViz config references. Import maps these references to local paths;
+blank mappings explicitly leave the references unassigned. The portable
+allowlist omits the personal last view, layout, log filters, and credentials.
+
 Build from a sourced ROS 2 Jazzy workspace:
 
 ```bash

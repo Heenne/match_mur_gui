@@ -64,10 +64,13 @@ def test_remote_simulation_uses_selected_host_and_stops_only_its_owned_run(tmp_p
         "with open(os.environ['MUR_FAKE_SSH_ARGS_FILE'], 'a') as f: f.write(repr(args) + '\\n')\n"
         "script = ' '.join(args)\n"
         "if 'kill -INT --' in script:\n"
-        " if 'MUR_GUI_RUN_ID=' not in script or '/proc/' not in script or 'sim-host' not in script: sys.exit(51)\n"
+        " if 'MUR_GUI_RUN_ID=' not in script or '/proc/' not in script or not any(host in script for host in ('sim-host', 'lab-host')): sys.exit(51)\n"
         " pathlib.Path(os.environ['MUR_FAKE_REMOTE_STOP_FILE']).write_text(script)\n"
         " sys.exit(0)\n"
-        "if 'ros2 launch mur_launch_sim' not in script: sys.exit(52)\n"
+        "is_sim = 'ros2 launch mur_launch_sim' in script\n"
+        "is_hardware = 'start_mur620_hardware_logged.sh' in script\n"
+        "if not (is_sim or is_hardware): sys.exit(52)\n"
+        "if is_hardware and ('CLEAN_START=false' not in script or 'BUILD_BEFORE_LAUNCH=false' not in script or 'launch_ur_l:=false' not in script or 'launch_mir:=true' not in script or '${HOME}/colcon_ws' not in script): sys.exit(53)\n"
         "print('__MUR_GUI_PID__=4242', flush=True)\n"
         "print('remote launch ready', flush=True)\n"
         "while not pathlib.Path(os.environ['MUR_FAKE_REMOTE_STOP_FILE']).exists(): time.sleep(.02)\n"
@@ -86,8 +89,13 @@ def test_remote_simulation_uses_selected_host_and_stops_only_its_owned_run(tmp_p
         [str(executable), "--contract-test-remote-process-manager"],
         env=environment, text=True, capture_output=True, timeout=20,
     )
-    assert result.returncode == 0, result.stderr + result.stdout
+    assert result.returncode == 0, result.stderr + result.stdout + (args_file.read_text() if args_file.exists() else "")
     assert "Remote process manager contract passed" in result.stderr + result.stdout
     assert stop_file.exists()
     assert args_file.exists() and "sim-host" in args_file.read_text()
     assert "ros2 launch mur_launch_sim" in args_file.read_text()
+    assert "start_mur620_hardware_logged.sh" in args_file.read_text()
+    assert "CLEAN_START=false" in args_file.read_text()
+    assert "BUILD_BEFORE_LAUNCH=false" in args_file.read_text()
+    assert "${HOME}/colcon_ws" in args_file.read_text()
+    assert "/home/rosmatch" not in args_file.read_text()

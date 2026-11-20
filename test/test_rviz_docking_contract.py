@@ -36,3 +36,9 @@ def test_unknown_arguments_are_rejected():
     result = _run("--nonsense")
     assert result.returncode == 2
     assert "Unknown or incomplete argument" in result.stderr
+
+
+def test_remote_discovery_configures_domain_and_direct_peer_before_ros_init():
+    result = _run("--contract-test-remote-discovery")
+    assert result.returncode == 0, result.stderr
+    assert "Remote discovery contract passed" in result.stderr + result.stdout

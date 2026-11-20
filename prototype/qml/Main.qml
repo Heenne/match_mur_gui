@@ -126,7 +126,7 @@ Item {
                     Label { text: "Profiles"; color: window.foreground; font.pixelSize: 20; font.bold: true }
                     Label { Layout.fillWidth: true; text: "Edit and save the selected profile. Workspace and RViz paths are machine-local references."; color: window.muted; wrapMode: Text.WordWrap }
                     RowLayout {
-                        Button { text: "Edit profile"; onClicked: { profileName.text = session.preset; profileMode.currentIndex = profileMode.model.indexOf(session.mode); profileTarget.text = session.target; profileRobot.text = session.robot; profileVisualization.currentIndex = profileVisualization.model.indexOf(session.visualization); profileWorkspace.text = session.workspacePath; profileConfig.text = session.configPath; profileDialog.open() } }
+                        Button { text: "Edit profile"; onClicked: { profileName.text = session.preset; profileMode.currentIndex = profileMode.model.indexOf(session.mode); profileTarget.text = session.target; profileDomain.text = String(session.rosDomain); profileRobot.text = session.robot; profileVisualization.currentIndex = profileVisualization.model.indexOf(session.visualization); profileWorkspace.text = session.workspacePath; profileConfig.text = session.configPath; profileDialog.open() } }
                         Button { text: "Export preset…"; onClicked: exportDialog.open() }
                         Button { text: "Import preset…"; onClicked: importFileDialog.open() }
                     }
@@ -150,11 +150,12 @@ Item {
             TextField { id: profileName; Layout.fillWidth: true; placeholderText: "Profile name" }
             ComboBox { id: profileMode; Layout.fillWidth: true; model: ["Simulation", "Hardware"] }
             TextField { id: profileTarget; Layout.fillWidth: true; placeholderText: "Target host" }
+            TextField { id: profileDomain; Layout.fillWidth: true; placeholderText: "ROS domain (0–232)"; validator: IntValidator { bottom: 0; top: 232 } }
             TextField { id: profileRobot; Layout.fillWidth: true; placeholderText: "Robot" }
             ComboBox { id: profileVisualization; Layout.fillWidth: true; model: ["RViz", "MuR data view"] }
             TextField { id: profileWorkspace; Layout.fillWidth: true; placeholderText: "Workspace path (machine-local)" }
             TextField { id: profileConfig; Layout.fillWidth: true; placeholderText: "RViz config path (machine-local)" }
-            Button { text: "Save profile"; Layout.alignment: Qt.AlignRight; onClicked: if (session.saveProfile(profileName.text, profileMode.currentText, profileTarget.text, profileRobot.text, profileVisualization.currentText, profileWorkspace.text, profileConfig.text)) profileDialog.close() }
+            Button { text: "Save profile"; Layout.alignment: Qt.AlignRight; onClicked: if (session.saveProfile(profileName.text, profileMode.currentText, profileTarget.text, profileRobot.text, profileVisualization.currentText, profileWorkspace.text, profileConfig.text, Number(profileDomain.text))) profileDialog.close() }
         }
     }
     NativeDialogs.FileDialog {

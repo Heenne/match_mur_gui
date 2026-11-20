@@ -18,6 +18,10 @@ def test_fake_launcher_captures_argv_environment_streams_exit_and_owned_stop(tmp
         "if sys.argv[1:2] == ['launch']:\n"
         " print('fake simulation argv=' + repr(sys.argv[1:]), flush=True)\n"
         " sys.exit(0)\n"
+        "if sys.argv[1:2] == ['sim']:\n"
+        " print('fake gz argv=' + repr(sys.argv[1:]), flush=True)\n"
+        " subprocess.Popen(['sleep', '60'])\n"
+        " while True: time.sleep(1)\n"
         "print('fake hold ready', flush=True)\n"
         "subprocess.Popen(['sleep', '60'])\n"
         "while True: time.sleep(1)\n"
@@ -26,6 +30,7 @@ def test_fake_launcher_captures_argv_environment_streams_exit_and_owned_stop(tmp
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     (fake_bin / "ros2").symlink_to(fake)
+    (fake_bin / "gz").symlink_to(fake)
     executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
     environment = os.environ.copy()
     environment.update({

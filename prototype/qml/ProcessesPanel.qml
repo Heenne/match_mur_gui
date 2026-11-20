@@ -5,9 +5,19 @@ import QtQuick.Layouts 1.12
 Rectangle {
     id: root
     required property var processManager
+    property bool waitingForSimulationServer: false
+    property int autoOpenAttempts: 0
+    property bool autoOpenTimedOut: false
     color: "#1b2933"
     radius: 12
     border.color: "#2b3c47"
+
+    function processState(name) {
+        for (let i = 0; i < processManager.processes.length; ++i) {
+            if (processManager.processes[i].name === name) return processManager.processes[i].state
+        }
+        return "Stopped"
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -18,7 +28,7 @@ Rectangle {
         Label {
             Layout.fillWidth: true
             text: session.target === "localhost" || session.target === "127.0.0.1"
-                  ? "Start the local MuR620 simulation in one action. Gazebo GUI is disabled; each app-started process has its own status and captured output."
+                  ? "Start the local MuR620 simulation in one action. Gazebo can run headless; its world view is a separate client."
                   : "Start the MuR620 simulation over SSH on " + session.target + ". The remote ROS 2 Jazzy workspace must be available in a login shell; SSH keys or an agent must allow non-interactive access."
             color: "#a8bac5"
             wrapMode: Text.WordWrap
@@ -27,12 +37,50 @@ Rectangle {
             Button {
                 text: session.target === "localhost" || session.target === "127.0.0.1" ? "Start simulation" : "Start remote simulation"
                 enabled: session.mode === "Simulation"
-                onClicked: session.target === "localhost" || session.target === "127.0.0.1"
-                           ? root.processManager.startSimulation(session.robot)
-                           : root.processManager.startRemoteSimulation(session.target, session.rosDomain, session.robot)
+                onClicked: {
+                    if (session.target === "localhost" || session.target === "127.0.0.1") {
+                        if (root.processManager.startSimulation(session.robot) && session.gazeboViewOnSimulationStart) {
+                            root.waitingForSimulationServer = true
+                            root.autoOpenAttempts = 0
+                            root.autoOpenTimedOut = false
+                            if (session.connectionState !== "Connected") session.connectToTarget()
+                        }
+                    } else {
+                        root.processManager.startRemoteSimulation(session.target, session.rosDomain, session.robot)
+                    }
+                }
             }
-            Button { text: "Open Gazebo world view"; enabled: session.target === "localhost" || session.target === "127.0.0.1"; onClicked: root.processManager.startGazeboView() }
+            Button {
+                text: root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" ? "Close Gazebo world view" : "Open Gazebo world view"
+                enabled: (session.target === "localhost" || session.target === "127.0.0.1") &&
+                         (root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" || session.simulationServerAvailable)
+                onClicked: {
+                    if (root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting") root.processManager.stopProcess("Gazebo world view")
+                    else root.processManager.startGazeboView()
+                }
+            }
             Button { text: "Stop app-owned processes"; onClicked: root.processManager.stopAll() }
+        }
+        Label {
+            Layout.fillWidth: true
+            text: session.simulationServerAvailable ? "Simulation server available (/clock publisher detected)" : (root.autoOpenTimedOut ? "Server was not confirmed by /clock within 60 seconds; Gazebo client was not started." : "Gazebo world view needs a confirmed /clock publisher. Connect to the simulation ROS domain.")
+            color: session.simulationServerAvailable ? "#45d6a8" : "#a8bac5"
+            wrapMode: Text.WordWrap
+        }
+        Timer {
+            id: autoOpenTimer
+            interval: 500
+            repeat: true
+            running: root.waitingForSimulationServer
+            onTriggered: {
+                if (session.simulationServerAvailable) {
+                    root.waitingForSimulationServer = false
+                    if (root.processState("Gazebo world view") !== "Running" && root.processState("Gazebo world view") !== "Starting") root.processManager.startGazeboView()
+                } else if (++root.autoOpenAttempts >= 120) {
+                    root.waitingForSimulationServer = false
+                    root.autoOpenTimedOut = true
+                }
+            }
         }
         Rectangle { Layout.fillWidth: true; height: 1; color: "#354752" }
         ScrollView {

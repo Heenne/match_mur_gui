@@ -45,6 +45,7 @@
 #include "process_manager.hpp"
 #include "log_store.hpp"
 #include "log_panel.hpp"
+#include "goals_poses.hpp"
 #include "std_msgs/msg/string.hpp"
 
 namespace
@@ -145,6 +146,8 @@ class SessionController : public QObject
   Q_PROPERTY(QString workspacePath READ workspacePath NOTIFY changed)
   Q_PROPERTY(QString configPath READ configPath NOTIFY changed)
   Q_PROPERTY(bool useSimTime READ useSimTime NOTIFY changed)
+  Q_PROPERTY(bool gazeboViewOnSimulationStart READ gazeboViewOnSimulationStart NOTIFY changed)
+  Q_PROPERTY(bool simulationServerAvailable READ simulationServerAvailable NOTIFY changed)
   Q_PROPERTY(QString lastError READ lastError NOTIFY changed)
   Q_PROPERTY(QString view READ view NOTIFY changed)
   Q_PROPERTY(QString connectionState READ connectionState NOTIFY changed)
@@ -183,6 +186,11 @@ public:
     return command_line_override.trimmed().isEmpty() ? configPath().trimmed() : command_line_override.trimmed();
   }
   bool useSimTime() const { return mode() == "Simulation"; }
+  bool gazeboViewOnSimulationStart() const
+  {
+    return settings_->value(key("gazeboViewOnSimulationStart"), false).toBool();
+  }
+  bool simulationServerAvailable() const { return simulation_server_available_; }
   QString contextKey(const QString & command_line_override) const
   {
     return QString("%1|%2|%3|%4|%5|%6|%7")
@@ -258,6 +266,7 @@ public slots:
     if (!settings_->contains(group + "visualization")) settings_->setValue(group + "visualization", "RViz");
     if (!settings_->contains(group + "workspacePath")) settings_->setValue(group + "workspacePath", "");
     if (!settings_->contains(group + "configPath")) settings_->setValue(group + "configPath", "");
+    if (!settings_->contains(group + "gazeboViewOnSimulationStart")) settings_->setValue(group + "gazeboViewOnSimulationStart", false);
     if (!settings_->contains(group + "mode")) {
       settings_->setValue(group + "mode", clean == "Local simulation" ? "Simulation" : "Hardware");
     }
@@ -272,13 +281,25 @@ public slots:
     emit changed();
   }
   void selectRobot(const QString &robot) { setValue("robot", robot); }
+  Q_INVOKABLE void setGazeboViewOnSimulationStart(bool enabled)
+  {
+    settings_->setValue(key("gazeboViewOnSimulationStart"), enabled);
+    settings_->sync();
+    emit changed();
+  }
+  void setSimulationServerAvailable(bool available)
+  {
+    if (simulation_server_available_ == available) return;
+    simulation_server_available_ = available;
+    emit changed();
+  }
   void selectMode(const QString &mode)
   {
     if (mode == "Simulation" || mode == "Hardware") setValue("mode", mode);
   }
   Q_INVOKABLE bool saveProfile(const QString &name, const QString &mode, const QString &target,
     const QString &robot, const QString &visualization, const QString &workspace_path,
-    const QString &config_path, int ros_domain)
+    const QString &config_path, int ros_domain, bool gazebo_view_on_simulation_start = false)
   {
     const auto clean_name = name.trimmed();
     if (clean_name.isEmpty() || clean_name.contains('/') || clean_name.contains('\\') ||
@@ -297,6 +318,7 @@ public slots:
     settings_->setValue(group + "visualization", visualization);
     settings_->setValue(group + "workspacePath", workspace_path.trimmed());
     settings_->setValue(group + "configPath", config_path.trimmed());
+    settings_->setValue(group + "gazeboViewOnSimulationStart", gazebo_view_on_simulation_start);
     settings_->setValue("activePreset", clean_name);
     settings_->sync();
     clearError();
@@ -312,6 +334,7 @@ public slots:
     profile.insert("rosDomain", rosDomain());
     profile.insert("robot", robot());
     profile.insert("visualization", visualization());
+    profile.insert("gazeboViewOnSimulationStart", gazeboViewOnSimulationStart());
     profile.insert("requiresWorkspaceMapping", !workspacePath().trimmed().isEmpty());
     profile.insert("requiresConfigMapping", !configPath().trimmed().isEmpty());
     QJsonObject bundle;
@@ -353,6 +376,7 @@ public slots:
     const auto domain = profile.contains("rosDomain") ? profile.value("rosDomain").toInt(-1) : 62;
     const auto robot = profile.value("robot").toString().trimmed();
     const auto visualization = profile.value("visualization").toString();
+    const auto gazebo_view_on_simulation_start = profile.value("gazeboViewOnSimulationStart").toBool(false);
     if (bundle.value("format").toString() != "mur-command-center-preset" ||
       bundle.value("version").toInt(-1) != 1 || name.isEmpty() ||
       (mode != "Simulation" && mode != "Hardware") || target.isEmpty() || robot.isEmpty() ||
@@ -366,7 +390,8 @@ public slots:
     // Bundles contain only mapping-required flags; machine-local absolute paths never leave this host.
     const auto workspace = profile.value("requiresWorkspaceMapping").toBool() ? workspace_mapping.trimmed() : QString();
     const auto config = profile.value("requiresConfigMapping").toBool() ? config_mapping.trimmed() : QString();
-    return saveProfile(name, mode, target, robot, visualization, workspace, config, domain);
+    return saveProfile(name, mode, target, robot, visualization, workspace, config, domain,
+      gazebo_view_on_simulation_start);
   }
   void selectView(const QString &view)
   {
@@ -408,6 +433,7 @@ private:
   QString last_error_;
   QString discovery_route_;
   QStringList diagnostics_{"Not connected · choose Connect to inspect the existing ROS graph"};
+  bool simulation_server_available_{false};
 };
 
 bool run_session_contract_test()
@@ -456,6 +482,8 @@ bool run_ros_session_monitor_contract_test()
   auto observer = std::make_shared<rclcpp::Node>("session_monitor_contract_observer");
   auto fixture = std::make_shared<rclcpp::Node>("session_monitor_contract_fixture");
   RosSessionMonitor monitor(observer);
+  if (monitor.simulationServerAvailable()) return false;
+  auto clock_publisher = fixture->create_publisher<rosgraph_msgs::msg::Clock>("/clock", 10);
   auto wrong_type = fixture->create_publisher<std_msgs::msg::String>(
     "/mur620d/mobile_base_controller/cmd_vel", 10);
   using ListControllers = controller_manager_msgs::srv::ListControllers;
@@ -474,6 +502,9 @@ bool run_ros_session_monitor_contract_test()
 
   bool passed = false;
   for (int attempt = 0; attempt < 100; ++attempt) {
+    rosgraph_msgs::msg::Clock clock_message;
+    clock_message.clock.sec = attempt;
+    clock_publisher->publish(clock_message);
     executor.spin_some();
     const auto hardware = monitor.diagnose("localhost", "mur620d", "Hardware", 0);
     if (hardware.join("\n").contains("drive_controller: active")) {
@@ -481,7 +512,7 @@ bool run_ros_session_monitor_contract_test()
       passed = hardware.join("\n").contains("remote node(s) discovered") &&
         hardware.join("\n").contains("wrong type on /mur620d/mobile_base_controller/cmd_vel") &&
         hardware.join("\n").contains("Clock: not required in Hardware mode") &&
-        simulation.contains("Clock: missing (/clock has no publisher)");
+        simulation.contains("Clock: advancing") && monitor.simulationServerAvailable();
       break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -538,6 +569,42 @@ bool run_portable_preset_contract_test()
   SessionController restored;
   return !restored.importPreset(invalid_path, "", "") &&
     restored.lastError().contains("Unsupported or invalid");
+}
+
+bool run_gazebo_preset_contract_test()
+{
+  QTemporaryDir directory;
+  if (!directory.isValid()) return false;
+  const auto settings_path = directory.filePath("settings.ini");
+  const auto bundle_path = directory.filePath("preset.json");
+  const auto had_settings = qEnvironmentVariableIsSet("MUR_COMMAND_CENTER_SETTINGS");
+  const auto previous_settings = qEnvironmentVariable("MUR_COMMAND_CENTER_SETTINGS");
+  qputenv("MUR_COMMAND_CENTER_SETTINGS", settings_path.toLocal8Bit());
+  const bool passed = [&]() {
+    SessionController session;
+    if (session.gazeboViewOnSimulationStart()) return false;
+    session.setGazeboViewOnSimulationStart(true);
+    if (!session.gazeboViewOnSimulationStart() ||
+      !session.saveProfile("Hardware only", "Hardware", "robot-host", "mur620b", "RViz", "", "", 62, false) ||
+      session.gazeboViewOnSimulationStart()) return false;
+    session.selectPreset("Local simulation");
+    if (!session.gazeboViewOnSimulationStart() || !session.exportPreset(bundle_path)) return false;
+    session.selectPreset("Temporary");
+    if (!session.importPreset(bundle_path, "", "") || session.preset() != "Local simulation" ||
+      !session.gazeboViewOnSimulationStart()) return false;
+    return true;
+  }();
+  if (passed) {
+    SessionController restored;
+    if (restored.preset() != "Local simulation" || !restored.gazeboViewOnSimulationStart()) {
+      if (had_settings) qputenv("MUR_COMMAND_CENTER_SETTINGS", previous_settings.toLocal8Bit());
+      else qunsetenv("MUR_COMMAND_CENTER_SETTINGS");
+      return false;
+    }
+  }
+  if (had_settings) qputenv("MUR_COMMAND_CENTER_SETTINGS", previous_settings.toLocal8Bit());
+  else qunsetenv("MUR_COMMAND_CENTER_SETTINGS");
+  return passed;
 }
 
 bool run_rviz_session_contract_test()
@@ -734,13 +801,38 @@ bool run_process_manager_contract_test()
           for (const auto & simulation_row : manager.processes()) {
             if (simulation_row.toMap().value("name").toString() == "MUR620 simulation" &&
               simulation_row.toMap().value("state").toString() == "Exited") {
-              return manager.log().contains(
+              if (!manager.log().contains(
                 "mur_launch_sim', 'mur620.launch.py', 'robot_name:=mur620d', "
-                "'include_gz:=true', 'gazebo_gui:=false', 'launch_rviz:=false'");
+                "'include_gz:=true', 'gazebo_gui:=false', 'launch_rviz:=false'")) return false;
+              break;
             }
           }
+          if (manager.log().contains("fake simulation argv=")) break;
         }
-        return false;
+        if (!manager.startProcess("fake simulation server", fake_launcher, {"hold"}) ||
+          !manager.startGazeboView()) return false;
+        timer.restart();
+        while (timer.elapsed() < 5000 && !manager.log().contains("fake gz argv=")) {
+          QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+        if (!manager.log().contains("fake gz argv=['sim', '-g']")) return false;
+        manager.stopProcess("Gazebo world view");
+        timer.restart();
+        bool client_stopped = false;
+        while (timer.elapsed() < 5000) {
+          QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+          for (const auto & row : manager.processes()) {
+            const auto map = row.toMap();
+            if (map.value("name").toString() == "Gazebo world view" &&
+              map.value("state").toString() == "Stopped") client_stopped = true;
+            if (map.value("name").toString() == "fake simulation server" &&
+              map.value("state").toString() != "Running") return false;
+          }
+          if (client_stopped) break;
+        }
+        if (!client_stopped) return false;
+        manager.stopProcess("fake simulation server");
+        return true;
       }
     }
   }
@@ -789,7 +881,10 @@ public:
   PrototypeWindow(const QString & config_path, const QString & context, const QString & qml_path)
   : QMainWindow(), context_(context), config_override_(config_path), session_(new SessionController()),
     sim_base_jog_adapter_(std::make_shared<RosSimBaseJogAdapter>()),
-    sim_base_jog_(new SimulationBaseJog(sim_base_jog_adapter_, this))
+    sim_base_jog_(new SimulationBaseJog(sim_base_jog_adapter_, this)),
+    goals_poses_adapter_(std::make_shared<RosGoalsPosesAdapter>()),
+    goals_poses_(new GoalsPoses(goals_poses_adapter_,
+      QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/poses.json", this))
   {
     setWindowTitle(QString("MuR Command Center · %1").arg(context_));
     resize(1440, 900);
@@ -799,6 +894,7 @@ public:
     command_center->setResizeMode(QQuickWidget::SizeRootObjectToView);
     command_center->rootContext()->setContextProperty("session", session_);
     command_center->rootContext()->setContextProperty("simBaseJog", sim_base_jog_);
+    command_center->rootContext()->setContextProperty("goalsPoses", goals_poses_);
     process_manager_ = new ProcessManager(this);
     command_center->rootContext()->setContextProperty("processes", process_manager_);
     log_store_ = new LogStore(this);
@@ -824,6 +920,8 @@ public:
     }
     connect(session_, &SessionController::changed, this, [this]() {
       ensure_session_context();
+      goals_poses_->setConnected(session_->connectionState() == "Connected" &&
+        (session_->mode() == "Hardware" || session_->mode() == "Simulation"));
       setWindowTitle(QString("MuR Command Center · %1 · %2 · %3")
         .arg(session_->mode(), session_->preset(), session_->robot()));
       if (rviz_dock_) rviz_dock_->setWindowTitle("Visualisierung · " + session_label());
@@ -856,6 +954,7 @@ public:
   {
     if (!ensure_session_context()) return;
     if (session_monitor_) {
+      session_->setSimulationServerAvailable(session_monitor_->simulationServerAvailable());
       session_->setDiagnostics(session_diagnostics());
     }
   }
@@ -968,6 +1067,8 @@ public:
       rviz_node_->get_raw_node()->set_parameter(
         rclcpp::Parameter("use_sim_time", session_->useSimTime()));
       sim_base_jog_adapter_->setNode(rviz_node_->get_raw_node());
+      goals_poses_adapter_->setNode(rviz_node_->get_raw_node());
+      goals_poses_->setConnected(session_->mode() == "Hardware" || session_->mode() == "Simulation");
       ros_executor_->add_node(rviz_node_->get_raw_node());
       session_monitor_ = std::make_unique<RosSessionMonitor>(rviz_node_->get_raw_node(), log_store_);
       log_store_->append("ROS /rosout", "INFO",
@@ -996,6 +1097,7 @@ public:
       session_->setDiagnostics(session_diagnostics());
     } catch (const std::exception & error) {
       session_monitor_.reset();
+      session_->setSimulationServerAvailable(false);
       ros_spin_timer_.stop();
       diagnosis_timer_.stop();
       if (rviz_dock_) {
@@ -1007,6 +1109,8 @@ public:
       ros_executor_.reset();
       rviz_node_.reset();
       sim_base_jog_adapter_->setNode({});
+      goals_poses_adapter_->setNode({});
+      goals_poses_->setConnected(false);
       pending_context_.clear();
       connected_context_.clear();
       if (rclcpp::ok()) rclcpp::shutdown();
@@ -1029,11 +1133,14 @@ public:
       rviz_dock_ = nullptr;
     }
     session_monitor_.reset();
+    session_->setSimulationServerAvailable(false);
     log_store_->append("ROS /rosout", "WARN", "ROS session disconnected; live /rosout messages are unavailable.");
     if (ros_executor_ && rviz_node_) ros_executor_->remove_node(rviz_node_->get_raw_node());
     ros_executor_.reset();
     rviz_node_.reset();
     sim_base_jog_adapter_->setNode({});
+    goals_poses_adapter_->setNode({});
+    goals_poses_->setConnected(false);
     pending_context_.clear();
     connected_context_.clear();
     if (rclcpp::ok()) rclcpp::shutdown();
@@ -1058,6 +1165,8 @@ private:
   SessionController * session_;
   std::shared_ptr<RosSimBaseJogAdapter> sim_base_jog_adapter_;
   SimulationBaseJog * sim_base_jog_;
+  std::shared_ptr<RosGoalsPosesAdapter> goals_poses_adapter_;
+  GoalsPoses * goals_poses_;
   ProcessManager * process_manager_{nullptr};
   LogStore * log_store_{nullptr};
   LogPanel * log_panel_{nullptr};
@@ -1092,10 +1201,14 @@ int main(int argc, char ** argv)
       // Exercises the public monitor output against a live in-process ROS graph.
     } else if (arguments[i] == "--contract-test-portable-presets") {
       // Exercises portable preset serialization through the session interface.
+    } else if (arguments[i] == "--contract-test-gazebo-preset") {
+      // Verifies the persistent per-profile Gazebo auto-open preference.
     } else if (arguments[i] == "--contract-test-rviz-session") {
       // Checks active-profile RViz selection, time source, and unavailable profile errors.
     } else if (arguments[i] == "--contract-test-sim-base-jog") {
       // Exercises hold-to-run behavior against an isolated fake ROS adapter.
+    } else if (arguments[i] == "--contract-test-goals-poses") {
+      // Exercises pose CRUD, stale-pose rejection, and selected-robot routing through a fake adapter.
     } else if (arguments[i] == "--contract-test-remote-discovery") {
       // Exercises DDS environment setup without initializing ROS.
     } else if (arguments[i] == "--contract-test-process-manager") {
@@ -1160,6 +1273,14 @@ int main(int argc, char ** argv)
     qInfo("Portable preset contract passed");
     return 0;
   }
+  if (arguments.contains("--contract-test-gazebo-preset")) {
+    if (!run_gazebo_preset_contract_test()) {
+      qCritical("Gazebo preset contract failed");
+      return 1;
+    }
+    qInfo("Gazebo preset contract passed");
+    return 0;
+  }
   if (arguments.contains("--contract-test-rviz-session")) {
     if (!run_rviz_session_contract_test()) {
       qCritical("RViz session contract failed");
@@ -1174,6 +1295,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Simulation base jog contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-goals-poses")) {
+    if (!run_goals_poses_contract_test()) {
+      qCritical("Goals and poses contract failed");
+      return 1;
+    }
+    qInfo("Goals and poses contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-remote-discovery")) {

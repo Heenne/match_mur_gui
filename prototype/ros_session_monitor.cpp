@@ -37,6 +37,16 @@ RosSessionMonitor::RosSessionMonitor(const rclcpp::Node::SharedPtr & node, LogSt
     });
 }
 
+bool RosSessionMonitor::simulationServerAvailable() const
+{
+  const auto graph = node_->get_node_graph_interface();
+  const auto topics = graph->get_topic_names_and_types();
+  const auto clock = topics.find("/clock");
+  return clock != topics.end() &&
+    std::find(clock->second.begin(), clock->second.end(), "rosgraph_msgs/msg/Clock") != clock->second.end() &&
+    graph->count_publishers("/clock") > 0;
+}
+
 QStringList RosSessionMonitor::diagnose(const QString & target, const QString & robot,
   const QString & mode, int domain)
 {

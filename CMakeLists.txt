@@ -15,6 +15,9 @@ find_package(rosgraph_msgs REQUIRED)
 find_package(controller_manager_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(rcl_interfaces REQUIRED)
+find_package(actionlib_msgs REQUIRED)
+find_package(action_msgs REQUIRED)
+find_package(nav2_msgs REQUIRED)
 find_package(rviz_common REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 
@@ -26,10 +29,12 @@ add_executable(mur_rviz_docking_prototype
   prototype/log_panel.cpp
   prototype/simulation_base_jog.cpp
   prototype/simulation_base_jog.hpp
+  prototype/goals_poses.cpp
+  prototype/goals_poses.hpp
 )
 target_compile_features(mur_rviz_docking_prototype PRIVATE cxx_std_17)
 target_link_libraries(mur_rviz_docking_prototype Qt5::Widgets Qt5::QuickWidgets Qt5::Network)
-ament_target_dependencies(mur_rviz_docking_prototype ament_index_cpp controller_manager_msgs geometry_msgs rcl_interfaces rclcpp rosgraph_msgs rviz_common std_msgs)
+ament_target_dependencies(mur_rviz_docking_prototype action_msgs actionlib_msgs ament_index_cpp controller_manager_msgs geometry_msgs nav2_msgs rcl_interfaces rclcpp rosgraph_msgs rviz_common std_msgs)
 install(TARGETS mur_rviz_docking_prototype DESTINATION lib/${PROJECT_NAME})
 
 install(PROGRAMS
@@ -46,6 +51,8 @@ install(PROGRAMS
 if(BUILD_TESTING)
   add_test(NAME sim_base_jog_behavior COMMAND mur_rviz_docking_prototype --contract-test-sim-base-jog)
   set_tests_properties(sim_base_jog_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_test(NAME goals_poses_behavior COMMAND mur_rviz_docking_prototype --contract-test-goals-poses)
+  set_tests_properties(goals_poses_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_cartesian_startup test/test_cartesian_startup.py)
   ament_add_pytest_test(test_cartesian_jog test/test_cartesian_jog.py)

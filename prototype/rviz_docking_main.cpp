@@ -27,6 +27,8 @@
 #include <QRegularExpression>
 #include <QStatusBar>
 #include <QTimer>
+#include <QElapsedTimer>
+#include <QCoreApplication>
 #include <cstdlib>
 
 #include "ament_index_cpp/get_package_share_directory.hpp"
@@ -35,6 +37,7 @@
 #include "rviz_common/ros_integration/ros_node_abstraction.hpp"
 #include "rviz_common/visualization_frame.hpp"
 #include "ros_session_monitor.hpp"
+#include "process_manager.hpp"
 #include "std_msgs/msg/string.hpp"
 
 namespace
@@ -553,6 +556,66 @@ bool run_remote_discovery_contract_test()
   return passed && !rclcpp::ok();
 }
 
+bool run_process_manager_contract_test()
+{
+  const auto fake_launcher = qEnvironmentVariable("MUR_FAKE_LAUNCHER");
+  if (fake_launcher.isEmpty() || !QFileInfo::exists(fake_launcher)) return false;
+  ProcessManager manager;
+  if (!manager.startProcess("fake exit", fake_launcher, {"exit"})) return false;
+  QElapsedTimer timer;
+  timer.start();
+  while (timer.elapsed() < 5000) {
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    const auto rows = manager.processes();
+    if (!rows.isEmpty() && rows.first().toMap().value("state").toString() == "Failed") break;
+  }
+  auto rows = manager.processes();
+  if (rows.size() != 1 || rows.first().toMap().value("state").toString() != "Failed" ||
+    rows.first().toMap().value("exitCode").toInt() != 7 ||
+    !manager.log().contains("fake stdout") || !manager.log().contains("fake stderr") ||
+    !manager.log().contains("domain=47")) {
+    qCritical("fake exit contract: rows=%s log=%s", qPrintable(QString::fromUtf8(
+      QJsonDocument::fromVariant(rows).toJson())), qPrintable(manager.log()));
+    return false;
+  }
+
+  if (!manager.startProcess("fake hold", fake_launcher, {"hold"})) return false;
+  timer.restart();
+  while (timer.elapsed() < 5000 && !manager.log().contains("fake hold ready")) {
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+  }
+  if (!manager.log().contains("fake hold ready")) {
+    qCritical("fake hold did not start: %s", qPrintable(manager.log()));
+    return false;
+  }
+  manager.stopProcess("fake hold");
+  timer.restart();
+  while (timer.elapsed() < 5000) {
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    rows = manager.processes();
+    for (const auto & row : rows) {
+      if (row.toMap().value("name").toString() == "fake hold" &&
+        row.toMap().value("state").toString() == "Stopped") {
+        if (!manager.startSimulation("mur620d")) return false;
+        timer.restart();
+        while (timer.elapsed() < 5000) {
+          QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+          for (const auto & simulation_row : manager.processes()) {
+            if (simulation_row.toMap().value("name").toString() == "MUR620 simulation" &&
+              simulation_row.toMap().value("state").toString() == "Exited") {
+              return manager.log().contains(
+                "mur_launch_sim', 'mur620.launch.py', 'robot_name:=mur620d', "
+                "'include_gz:=true', 'gazebo_gui:=false', 'launch_rviz:=false'");
+            }
+          }
+        }
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
 class PrototypeWindow : public QMainWindow
 {
 public:
@@ -566,6 +629,8 @@ public:
     auto * command_center = new QQuickWidget(this);
     command_center->setResizeMode(QQuickWidget::SizeRootObjectToView);
     command_center->rootContext()->setContextProperty("session", session_);
+    process_manager_ = new ProcessManager(this);
+    command_center->rootContext()->setContextProperty("processes", process_manager_);
     command_center->setSource(QUrl::fromLocalFile(qml_path));
     setCentralWidget(command_center);
     connect(&ros_spin_timer_, &QTimer::timeout, this, &PrototypeWindow::spin_ros);
@@ -733,6 +798,7 @@ private:
   QString context_;
   QString config_path_;
   SessionController * session_;
+  ProcessManager * process_manager_{nullptr};
   std::shared_ptr<rviz_common::ros_integration::RosNodeAbstraction> rviz_node_;
   std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> ros_executor_;
   std::unique_ptr<RosSessionMonitor> session_monitor_;
@@ -765,6 +831,8 @@ int main(int argc, char ** argv)
       // Exercises portable preset serialization through the session interface.
     } else if (arguments[i] == "--contract-test-remote-discovery") {
       // Exercises DDS environment setup without initializing ROS.
+    } else if (arguments[i] == "--contract-test-process-manager") {
+      // Exercises process ownership and captured output through a fake executable.
     } else if (arguments[i] == "--context" && i + 1 < arguments.size()) {
       context = arguments[++i];
     } else if (arguments[i] == "--help" || arguments[i] == "-h") {
@@ -827,6 +895,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Remote discovery contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-process-manager")) {
+    if (!run_process_manager_contract_test()) {
+      qCritical("Process manager contract failed");
+      return 1;
+    }
+    qInfo("Process manager contract passed");
     return 0;
   }
   PrototypeWindow window(config_path, context, qml_path);

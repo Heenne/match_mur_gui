@@ -2,6 +2,7 @@ import QtQuick 2.12
 import QtQuick.Controls 2.5
 import QtQuick.Layouts 1.12
 import QtQuick.Dialogs 1.3 as NativeDialogs
+import "."
 
 Item {
     id: window
@@ -93,7 +94,7 @@ Item {
             Panel { heading: "Overview" }
             Panel { heading: "Visualization" }
             Panel { heading: "Robot" }
-            Panel { heading: "Processes" }
+            ProcessesPanel { processManager: processes }
             Rectangle {
                 color: "#1b2933"; radius: 12; border.color: "#2b3c47"
                 ColumnLayout {

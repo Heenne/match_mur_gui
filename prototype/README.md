@@ -89,3 +89,30 @@ SIGINT to the group. A foreign process is never selected by name or stopped.
 If SSH or the ownership check fails, the process row reports **Stop failed**
 and the log says the remote run may still be active. This prototype does not
 store SSH credentials; configure SSH keys or an agent on the operator account.
+
+## Hardware start prototype
+
+In Hardware mode, the Robot view provides a profile-persistent component and
+launch-options panel. **Run preflight** explicitly checks the selected host and
+the dashboard safety/remote-control state of each selected UR arm. A missing
+or unknown response blocks launch just like a reported failure; the GUI never
+clears a safety stop. Re-run preflight after changing the target, robot,
+connection, selected arms, or remote workspace.
+
+**Start selected hardware** is enabled only after every required check is
+confirmed. The app runs the existing hardware launch script with the selected
+arm, MiR, camera, controller, FT, collision, and MoveIt options. It sets
+`CLEAN_START=false` so the script will not kill pre-existing robot processes,
+and disables its implicit build. The remote workspace defaults to
+`$HOME/colcon_ws` on the target account; it can be changed per preset. The
+remote run is tracked as an app-owned process, with output in Processes and a
+scoped Stop action.
+
+Source synchronization and workspace build are separate actions. Sync requires
+the preset's local workspace mapping, confirms the source and destination in a
+dialog, excludes build/install/log/`.git`, and preserves remote-only files. It
+does not use `rsync --delete`. Build runs only when **Build workspace** is
+pressed. Both actions report completion or failure in the panel and Logs.
+Hardware launch and these operations use SSH non-interactively; configure SSH
+keys or an agent yourself. Tests use injected adapters and a fake SSH executable;
+they do not connect to or start physical hardware.

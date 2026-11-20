@@ -21,6 +21,11 @@
 #include <QUrl>
 #include <QTemporaryDir>
 #include <QStringList>
+#include <QHostInfo>
+#include <QHostAddress>
+#include <QDir>
+#include <QStandardPaths>
+#include <QRegularExpression>
 #include <QStatusBar>
 #include <QTimer>
 #include <QElapsedTimer>
@@ -40,6 +45,90 @@
 
 namespace
 {
+bool valid_remote_host(const QString & host)
+{
+  if (host == "::1") return true;
+  static const QRegularExpression host_pattern(
+    "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$");
+  return host == "localhost" || host_pattern.match(host).hasMatch();
+}
+
+QString configure_ros_environment(const QString & host, int domain,
+  const QList<QHostAddress> & addresses, const QString & profile_directory)
+{
+  if (domain < 0 || domain > 232) throw std::invalid_argument("ROS domain must be between 0 and 232");
+  if (!valid_remote_host(host)) throw std::invalid_argument("Target must be a host name only");
+  const QString owned_profile = qEnvironmentVariable("MUR_GUI_DDS_PROFILE_OWNED_PATH");
+  if (!owned_profile.isEmpty()) {
+    if (qEnvironmentVariable("FASTDDS_DEFAULT_PROFILES_FILE") == owned_profile) {
+      qunsetenv("FASTDDS_DEFAULT_PROFILES_FILE");
+    }
+    if (qEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE") == owned_profile) {
+      qunsetenv("FASTRTPS_DEFAULT_PROFILES_FILE");
+    }
+    qunsetenv("MUR_GUI_DDS_PROFILE_OWNED_PATH");
+  }
+  qputenv("ROS_DOMAIN_ID", QByteArray::number(domain));
+  const bool local_only = qEnvironmentVariable("ROS_LOCALHOST_ONLY") == "1" ||
+    qEnvironmentVariable("ROS_AUTOMATIC_DISCOVERY_RANGE").toUpper() == "LOCALHOST" ||
+    qEnvironmentVariable("ROS_AUTOMATIC_DISCOVERY_RANGE").toUpper() == "OFF";
+  if (local_only) return QString("Target %1 · domain %2 · local-only DDS settings prevent remote discovery")
+      .arg(host).arg(domain);
+
+  qputenv("ROS_AUTOMATIC_DISCOVERY_RANGE", "SUBNET");
+  const QString discovery_server = qEnvironmentVariable("ROS_DISCOVERY_SERVER");
+  if (!discovery_server.isEmpty()) {
+    return QString("Target %1 · domain %2 · ROS discovery server route %3")
+      .arg(host).arg(domain).arg(discovery_server);
+  }
+  const QString rmw = qEnvironmentVariable("RMW_IMPLEMENTATION");
+  if (!rmw.isEmpty() && rmw != "rmw_fastrtps_cpp" && rmw != "rmw_fastrtps_dynamic_cpp") {
+    return QString("Target %1 · domain %2 · middleware %3 configured; Fast DDS direct peers were not added")
+      .arg(host).arg(domain).arg(rmw);
+  }
+  if (host == "localhost" || host == "127.0.0.1" || host == "::1") {
+    return QString("Target %1 · domain %2 · subnet DDS discovery").arg(host).arg(domain);
+  }
+  if (addresses.isEmpty()) throw std::invalid_argument("Remote host resolved to no IPv4 addresses");
+
+  const QString fastdds = qEnvironmentVariable("FASTDDS_DEFAULT_PROFILES_FILE");
+  const QString fasrtps = qEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE");
+  for (const auto & profile : {fastdds, fasrtps}) {
+    if (!profile.isEmpty() && QFileInfo::exists(profile)) {
+      return QString("Target %1 · domain %2 · operator DDS profile %3; remote route not added")
+        .arg(host).arg(domain).arg(profile);
+    }
+  }
+
+  QDir().mkpath(profile_directory);
+  const QString path = QDir(profile_directory).filePath(QString("remote_domain_%1.xml").arg(domain));
+  QString xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+    "<profiles xmlns=\"http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles\">"
+    "<participant profile_name=\"mur_gui_remote_peers\" is_default_profile=\"true\">"
+    "<rtps><builtin><initialPeersList>";
+  for (const auto & address : addresses) {
+    for (int index = 0; index < 64; ++index) {
+      const int port = 7400 + 250 * domain + 10 + 2 * index;
+      if (port > 65535) break;
+      xml += QString("<locator><udpv4><address>%1</address><port>%2</port></udpv4></locator>")
+        .arg(address.toString()).arg(port);
+    }
+  }
+  xml += "</initialPeersList></builtin></rtps></participant></profiles>";
+  QSaveFile file(path);
+  if (!file.open(QIODevice::WriteOnly) || file.write(xml.toUtf8()) != xml.toUtf8().size() || !file.commit()) {
+    throw std::runtime_error("Could not write direct DDS peer profile");
+  }
+  qputenv("FASTDDS_DEFAULT_PROFILES_FILE", path.toLocal8Bit());
+  qputenv("FASTRTPS_DEFAULT_PROFILES_FILE", path.toLocal8Bit());
+  qputenv("MUR_GUI_DDS_PROFILE_OWNED_PATH", path.toLocal8Bit());
+  QStringList rendered;
+  for (const auto & address : addresses) rendered << address.toString();
+  rendered.removeDuplicates();
+  return QString("Target %1 resolved to %2 · domain %3 · direct DDS peer route; UDP reachability is not yet confirmed")
+    .arg(host, rendered.join(", ")).arg(domain);
+}
+
 class SessionController : public QObject
 {
   Q_OBJECT
@@ -74,7 +163,12 @@ public:
 
   QString preset() const { return settings_->value("activePreset").toString(); }
   QString target() const { return value("target", "localhost"); }
-  int rosDomain() const { return qEnvironmentVariableIntValue("ROS_DOMAIN_ID"); }
+  int rosDomain() const
+  {
+    bool valid = false;
+    const int configured = value("rosDomain", qEnvironmentVariable("ROS_DOMAIN_ID", "62")).toInt(&valid);
+    return valid && configured >= 0 && configured <= 232 ? configured : 62;
+  }
   QString robot() const { return value("robot", "mur620d"); }
   QString mode() const { return value("mode", preset() == "Local simulation" ? "Simulation" : "Hardware"); }
   QString visualization() const { return value("visualization", "RViz"); }
@@ -85,6 +179,12 @@ public:
     return command_line_override.trimmed().isEmpty() ? configPath().trimmed() : command_line_override.trimmed();
   }
   bool useSimTime() const { return mode() == "Simulation"; }
+  QString contextKey(const QString & command_line_override) const
+  {
+    return QString("%1|%2|%3|%4|%5|%6|%7")
+      .arg(preset(), mode(), target()).arg(rosDomain())
+      .arg(robot(), visualization(), rvizConfigPath(command_line_override));
+  }
   bool validateRvizProfile(const QString & command_line_override, QString * error) const
   {
     if (mode() != "Simulation" && mode() != "Hardware") {
@@ -149,6 +249,7 @@ public slots:
     const auto group = QString("presets/%1/").arg(clean);
     if (!settings_->contains(group + "view")) settings_->setValue(group + "view", "Overview");
     if (!settings_->contains(group + "target")) settings_->setValue(group + "target", "localhost");
+    if (!settings_->contains(group + "rosDomain")) settings_->setValue(group + "rosDomain", 62);
     if (!settings_->contains(group + "robot")) settings_->setValue(group + "robot", "mur620d");
     if (!settings_->contains(group + "visualization")) settings_->setValue(group + "visualization", "RViz");
     if (!settings_->contains(group + "workspacePath")) settings_->setValue(group + "workspacePath", "");
@@ -161,6 +262,11 @@ public slots:
     emit changed();
   }
   void selectTarget(const QString &target) { setValue("target", target); }
+  void selectRosDomain(int domain)
+  {
+    if (domain >= 0 && domain <= 232) settings_->setValue(key("rosDomain"), domain);
+    emit changed();
+  }
   void selectRobot(const QString &robot) { setValue("robot", robot); }
   void selectMode(const QString &mode)
   {
@@ -168,18 +274,21 @@ public slots:
   }
   Q_INVOKABLE bool saveProfile(const QString &name, const QString &mode, const QString &target,
     const QString &robot, const QString &visualization, const QString &workspace_path,
-    const QString &config_path)
+    const QString &config_path, int ros_domain)
   {
     const auto clean_name = name.trimmed();
     if (clean_name.isEmpty() || clean_name.contains('/') || clean_name.contains('\\') ||
       (mode != "Simulation" && mode != "Hardware") || target.trimmed().isEmpty() ||
-      robot.trimmed().isEmpty() || (visualization != "RViz" && visualization != "MuR data view")) {
-      setError("Profile needs a name, Simulation or Hardware mode, target, robot, and a supported visualization.");
+      robot.trimmed().isEmpty() || !valid_remote_host(target.trimmed()) ||
+      ros_domain < 0 || ros_domain > 232 ||
+      (visualization != "RViz" && visualization != "MuR data view")) {
+      setError("Profile needs a name, Simulation or Hardware mode, host name, domain 0–232, robot, and supported visualization.");
       return false;
     }
     const auto group = QString("presets/%1/").arg(clean_name);
     settings_->setValue(group + "mode", mode);
     settings_->setValue(group + "target", target.trimmed());
+    settings_->setValue(group + "rosDomain", ros_domain);
     settings_->setValue(group + "robot", robot.trimmed());
     settings_->setValue(group + "visualization", visualization);
     settings_->setValue(group + "workspacePath", workspace_path.trimmed());
@@ -196,6 +305,7 @@ public slots:
     profile.insert("name", preset());
     profile.insert("mode", mode());
     profile.insert("target", target());
+    profile.insert("rosDomain", rosDomain());
     profile.insert("robot", robot());
     profile.insert("visualization", visualization());
     profile.insert("requiresWorkspaceMapping", !workspacePath().trimmed().isEmpty());
@@ -236,11 +346,13 @@ public slots:
     const auto name = profile.value("name").toString().trimmed();
     const auto mode = profile.value("mode").toString();
     const auto target = profile.value("target").toString().trimmed();
+    const auto domain = profile.contains("rosDomain") ? profile.value("rosDomain").toInt(-1) : 62;
     const auto robot = profile.value("robot").toString().trimmed();
     const auto visualization = profile.value("visualization").toString();
     if (bundle.value("format").toString() != "mur-command-center-preset" ||
       bundle.value("version").toInt(-1) != 1 || name.isEmpty() ||
       (mode != "Simulation" && mode != "Hardware") || target.isEmpty() || robot.isEmpty() ||
+      !valid_remote_host(target) || domain < 0 || domain > 232 ||
       (visualization != "RViz" && visualization != "MuR data view") ||
       !profile.value("requiresWorkspaceMapping").isBool() ||
       !profile.value("requiresConfigMapping").isBool()) {
@@ -250,7 +362,7 @@ public slots:
     // Bundles contain only mapping-required flags; machine-local absolute paths never leave this host.
     const auto workspace = profile.value("requiresWorkspaceMapping").toBool() ? workspace_mapping.trimmed() : QString();
     const auto config = profile.value("requiresConfigMapping").toBool() ? config_mapping.trimmed() : QString();
-    return saveProfile(name, mode, target, robot, visualization, workspace, config);
+    return saveProfile(name, mode, target, robot, visualization, workspace, config, domain);
   }
   void selectView(const QString &view)
   {
@@ -259,7 +371,13 @@ public slots:
   }
   void connectToTarget() { if (connection_state_ == "Disconnected" || connection_state_.startsWith("Failed")) emit connectRequested(); }
   void disconnectFromTarget() { emit disconnectRequested(); }
-  void setDiagnostics(const QStringList &diagnostics) { diagnostics_ = diagnostics; emit changed(); }
+  void setDiagnostics(const QStringList &diagnostics)
+  {
+    diagnostics_ = diagnostics;
+    if (!discovery_route_.isEmpty()) diagnostics_.prepend("DDS route: " + discovery_route_);
+    emit changed();
+  }
+  void setDiscoveryRoute(const QString &route) { discovery_route_ = route; }
   void setConnectionState(const QString &state) { connection_state_ = state; emit changed(); }
 
 signals:
@@ -284,6 +402,7 @@ private:
   std::unique_ptr<QSettings> settings_;
   QString connection_state_{"Disconnected"};
   QString last_error_;
+  QString discovery_route_;
   QStringList diagnostics_{"Not connected · choose Connect to inspect the existing ROS graph"};
 };
 
@@ -378,7 +497,7 @@ bool run_portable_preset_contract_test()
   {
     SessionController session;
     if (!session.saveProfile("Portable lab", "Hardware", "lab-host", "mur620b",
-      "MuR data view", "/old/workspace", "/old/config.rviz")) return false;
+      "MuR data view", "/old/workspace", "/old/config.rviz", 87)) return false;
     session.selectView("Logs");
     if (!session.exportPreset(bundle_path)) return false;
     QFile exported(bundle_path);
@@ -390,7 +509,7 @@ bool run_portable_preset_contract_test()
     const auto bundle = document.object();
     const auto profile = bundle.value("profile").toObject();
     if (bundle.value("version").toInt() != 1 || profile.value("name").toString() != "Portable lab" ||
-      profile.value("mode").toString() != "Hardware" ||
+      profile.value("mode").toString() != "Hardware" || profile.value("rosDomain").toInt() != 87 ||
       profile.value("visualization").toString() != "MuR data view" ||
       profile.contains("view") || profile.contains("lastView") || profile.contains("logFilter") ||
       profile.contains("workspacePath") || profile.contains("configPath") ||
@@ -398,10 +517,10 @@ bool run_portable_preset_contract_test()
       !profile.value("requiresConfigMapping").toBool() ||
       exported_bytes.contains("/old/workspace") || exported_bytes.contains("/old/config.rviz") ||
       profile.contains("password") || bundle.contains("credentials")) return false;
-    session.saveProfile("Temporary", "Simulation", "localhost", "mur620d", "RViz", "", "");
+    session.saveProfile("Temporary", "Simulation", "localhost", "mur620d", "RViz", "", "", 0);
     if (!session.importPreset(bundle_path, "/new/workspace", "/new/config.rviz") ||
       session.preset() != "Portable lab" || session.mode() != "Hardware" ||
-      session.target() != "lab-host" || session.robot() != "mur620b" ||
+      session.target() != "lab-host" || session.rosDomain() != 87 || session.robot() != "mur620b" ||
       session.visualization() != "MuR data view" || session.workspacePath() != "/new/workspace" ||
       session.configPath() != "/new/config.rviz") return false;
     if (!session.importPreset(bundle_path, "", "") || !session.workspacePath().isEmpty() ||
@@ -439,30 +558,35 @@ bool run_rviz_session_contract_test()
 
   SessionController session;
   QString error;
-  if (!session.saveProfile("Simulation view", "Simulation", "localhost", "mur620d", "RViz", "", sim_path) ||
+  if (!session.saveProfile("Simulation view", "Simulation", "localhost", "mur620d", "RViz", "", sim_path, session.rosDomain()) ||
     !session.useSimTime() || session.rvizConfigPath("") != sim_path ||
     !session.validateRvizProfile("", &error) || !error.isEmpty()) return false;
-  const auto simulation_context = QString("%1|%2|%3|%4|%5|%6")
-    .arg(session.preset(), session.mode(), session.target()).arg(session.rosDomain())
-    .arg(session.robot(), session.rvizConfigPath(""));
+  const auto simulation_context = session.contextKey("");
   if (session.rvizConfigPath(override_path) != override_path ||
     !session.validateRvizProfile(override_path, &error)) return false;
 
-  if (!session.saveProfile("Hardware view", "Hardware", "robot-host", "mur620b", "RViz", "", hardware_path) ||
+  if (!session.saveProfile("Hardware view", "Hardware", "robot-host", "mur620b", "RViz", "", hardware_path, session.rosDomain()) ||
     session.useSimTime() || session.rvizConfigPath("") != hardware_path ||
     !session.validateRvizProfile("", &error)) return false;
-  const auto hardware_context = QString("%1|%2|%3|%4|%5|%6")
-    .arg(session.preset(), session.mode(), session.target()).arg(session.rosDomain())
-    .arg(session.robot(), session.rvizConfigPath(""));
+  const auto hardware_context = session.contextKey("");
   if (simulation_context == hardware_context) return false;
+  const auto hardware_host_context = session.contextKey("");
+  session.selectTarget("another-robot-host");
+  const auto alternate_host_context = session.contextKey("");
+  if (hardware_host_context == alternate_host_context) return false;
+  const auto previous_domain = session.rosDomain();
+  session.selectRosDomain(89);
+  const auto alternate_domain_context = session.contextKey("");
+  if (alternate_domain_context == alternate_host_context) return false;
+  session.selectRosDomain(previous_domain);
 
-  if (!session.saveProfile("Missing view", "Simulation", "localhost", "mur620d", "RViz", "", "") ||
+  if (!session.saveProfile("Missing view", "Simulation", "localhost", "mur620d", "RViz", "", "", session.rosDomain()) ||
     session.validateRvizProfile("", &error) || !error.contains("no RViz configuration")) return false;
-  if (!session.saveProfile("Empty view", "Hardware", "localhost", "mur620d", "RViz", "", empty_path) ||
+  if (!session.saveProfile("Empty view", "Hardware", "localhost", "mur620d", "RViz", "", empty_path, session.rosDomain()) ||
     session.validateRvizProfile("", &error) || !error.contains("is empty")) return false;
-  if (!session.saveProfile("Invalid view", "Hardware", "localhost", "mur620d", "RViz", "", invalid_path) ||
+  if (!session.saveProfile("Invalid view", "Hardware", "localhost", "mur620d", "RViz", "", invalid_path, session.rosDomain()) ||
     session.validateRvizProfile("", &error) || !error.contains("is invalid")) return false;
-  if (!session.saveProfile("Unsupported view", "Hardware", "localhost", "mur620d", "MuR data view", "", hardware_path) ||
+  if (!session.saveProfile("Unsupported view", "Hardware", "localhost", "mur620d", "MuR data view", "", hardware_path, session.rosDomain()) ||
     session.validateRvizProfile("", &error) || !error.contains("RViz is unavailable")) return false;
 
   rclcpp::init(0, nullptr);
@@ -470,7 +594,8 @@ bool run_rviz_session_contract_test()
   for (const auto & profile : {std::pair<std::string, std::string>{"sim", "Simulation"},
       {"hardware", "Hardware"}}) {
     if (!session.saveProfile("Time source", QString::fromStdString(profile.second), "localhost",
-      "mur620d", "RViz", "", profile.first == "sim" ? sim_path : hardware_path)) return false;
+      "mur620d", "RViz", "", profile.first == "sim" ? sim_path : hardware_path,
+      session.rosDomain())) return false;
     auto node = std::make_shared<rviz_common::ros_integration::RosNodeAbstraction>(
       "rviz_time_contract_" + profile.first);
     node->get_raw_node()->set_parameter(rclcpp::Parameter("use_sim_time", session.useSimTime()));
@@ -480,6 +605,82 @@ bool run_rviz_session_contract_test()
   rclcpp::shutdown();
   if (!time_parameter_matches_profile) return false;
   return true;
+}
+
+bool run_remote_discovery_contract_test()
+{
+  QTemporaryDir directory;
+  if (!directory.isValid()) return false;
+  const auto old_domain = qgetenv("ROS_DOMAIN_ID");
+  const auto old_range = qgetenv("ROS_AUTOMATIC_DISCOVERY_RANGE");
+  const auto old_fastdds = qgetenv("FASTDDS_DEFAULT_PROFILES_FILE");
+  const auto old_fastrtps = qgetenv("FASTRTPS_DEFAULT_PROFILES_FILE");
+  const auto old_discovery_server = qgetenv("ROS_DISCOVERY_SERVER");
+  const auto old_localhost_only = qgetenv("ROS_LOCALHOST_ONLY");
+  const auto old_owned_profile = qgetenv("MUR_GUI_DDS_PROFILE_OWNED_PATH");
+  const auto old_rmw = qgetenv("RMW_IMPLEMENTATION");
+  const bool had_domain = qEnvironmentVariableIsSet("ROS_DOMAIN_ID");
+  const bool had_range = qEnvironmentVariableIsSet("ROS_AUTOMATIC_DISCOVERY_RANGE");
+  const bool had_fastdds = qEnvironmentVariableIsSet("FASTDDS_DEFAULT_PROFILES_FILE");
+  const bool had_fastrtps = qEnvironmentVariableIsSet("FASTRTPS_DEFAULT_PROFILES_FILE");
+  const bool had_discovery_server = qEnvironmentVariableIsSet("ROS_DISCOVERY_SERVER");
+  const bool had_localhost_only = qEnvironmentVariableIsSet("ROS_LOCALHOST_ONLY");
+  const bool had_owned_profile = qEnvironmentVariableIsSet("MUR_GUI_DDS_PROFILE_OWNED_PATH");
+  const bool had_rmw = qEnvironmentVariableIsSet("RMW_IMPLEMENTATION");
+  qputenv("ROS_AUTOMATIC_DISCOVERY_RANGE", "SUBNET");
+  qunsetenv("ROS_DISCOVERY_SERVER");
+  qunsetenv("ROS_LOCALHOST_ONLY");
+  qunsetenv("MUR_GUI_DDS_PROFILE_OWNED_PATH");
+  qunsetenv("RMW_IMPLEMENTATION");
+  qunsetenv("FASTDDS_DEFAULT_PROFILES_FILE");
+  qunsetenv("FASTRTPS_DEFAULT_PROFILES_FILE");
+  bool passed = false;
+  try {
+    const auto route = configure_ros_environment("robot.lab.example", 87,
+      {QHostAddress("10.8.0.21")}, directory.path());
+    QFile profile(qEnvironmentVariable("FASTDDS_DEFAULT_PROFILES_FILE"));
+    passed = qEnvironmentVariable("ROS_DOMAIN_ID") == "87" && profile.open(QIODevice::ReadOnly);
+    const auto xml = QString::fromUtf8(profile.readAll());
+    passed = passed && route.contains("direct DDS peer route") &&
+      route.contains("UDP reachability is not yet confirmed") &&
+      xml.contains("<address>10.8.0.21</address>") && xml.contains("<port>29160</port>") &&
+      qEnvironmentVariable("FASTDDS_DEFAULT_PROFILES_FILE") ==
+      qEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE");
+    configure_ros_environment("robot.lab.example", 87,
+      {QHostAddress("10.8.0.22")}, directory.path());
+    QFile refreshed(qEnvironmentVariable("FASTDDS_DEFAULT_PROFILES_FILE"));
+    passed = passed && refreshed.open(QIODevice::ReadOnly);
+    const auto refreshed_xml = QString::fromUtf8(refreshed.readAll());
+    passed = passed && refreshed_xml.contains("<address>10.8.0.22</address>") &&
+      !refreshed_xml.contains("<address>10.8.0.21</address>");
+    configure_ros_environment("localhost", 87, {}, directory.path());
+    passed = passed && !qEnvironmentVariableIsSet("FASTDDS_DEFAULT_PROFILES_FILE") &&
+      !qEnvironmentVariableIsSet("FASTRTPS_DEFAULT_PROFILES_FILE");
+    bool invalid_domain_rejected = false;
+    try { configure_ros_environment("robot.lab.example", 233, {}, directory.path()); }
+    catch (const std::invalid_argument &) { invalid_domain_rejected = true; }
+    bool credentials_rejected = false;
+    try { configure_ros_environment("user:secret@robot", 87, {}, directory.path()); }
+    catch (const std::invalid_argument &) { credentials_rejected = true; }
+    passed = passed && invalid_domain_rejected && credentials_rejected;
+    if (passed) {
+      rclcpp::init(0, nullptr);
+      passed = rclcpp::contexts::get_global_default_context()->get_domain_id() == 87;
+      rclcpp::shutdown();
+    }
+  } catch (...) { passed = false; }
+  auto restore = [](const char * key, bool existed, const QByteArray & value) {
+      if (existed) qputenv(key, value); else qunsetenv(key);
+    };
+  restore("ROS_DOMAIN_ID", had_domain, old_domain);
+  restore("ROS_AUTOMATIC_DISCOVERY_RANGE", had_range, old_range);
+  restore("FASTDDS_DEFAULT_PROFILES_FILE", had_fastdds, old_fastdds);
+  restore("FASTRTPS_DEFAULT_PROFILES_FILE", had_fastrtps, old_fastrtps);
+  restore("ROS_DISCOVERY_SERVER", had_discovery_server, old_discovery_server);
+  restore("ROS_LOCALHOST_ONLY", had_localhost_only, old_localhost_only);
+  restore("MUR_GUI_DDS_PROFILE_OWNED_PATH", had_owned_profile, old_owned_profile);
+  restore("RMW_IMPLEMENTATION", had_rmw, old_rmw);
+  return passed && !rclcpp::ok();
 }
 
 bool run_process_manager_contract_test()
@@ -612,9 +813,7 @@ public:
 
   QString session_context() const
   {
-    return QString("%1|%2|%3|%4|%5|%6|%7")
-      .arg(session_->preset(), session_->mode(), session_->target()).arg(session_->rosDomain())
-      .arg(session_->robot(), session_->visualization(), session_->rvizConfigPath(config_override_));
+    return session_->contextKey(config_override_);
   }
 
   QString session_label() const
@@ -637,6 +836,14 @@ public:
 
   bool ensure_session_context()
   {
+    if (!pending_context_.isEmpty() && session_->connectionState() == "Connecting" &&
+      pending_context_ != session_context()) {
+      pending_context_.clear();
+      session_->setDiscoveryRoute(QString());
+      session_->setDiagnostics({"Session context changed before RViz connected; connect again to use the selected profile"});
+      session_->setConnectionState("Disconnected");
+      return false;
+    }
     if (rviz_node_ && !connected_context_.isEmpty() && connected_context_ != session_context()) {
       const auto old_context = connected_context_;
       disconnect_ros();
@@ -650,7 +857,6 @@ public:
   void connect_ros()
   {
     if (rviz_node_) return;
-    session_->setConnectionState("Connecting");
     QString profile_error;
     if (!session_->validateRvizProfile(config_override_, &profile_error)) {
       session_->setDiagnostics({"RViz unavailable · " + profile_error,
@@ -658,7 +864,54 @@ public:
       session_->setConnectionState("Failed: " + profile_error);
       return;
     }
+    const QString host = session_->target().trimmed();
+    const int domain = session_->rosDomain();
+    if (!valid_remote_host(host)) {
+      session_->setDiagnostics({"Host/network: invalid target host name"});
+      session_->setConnectionState("Failed: invalid target host");
+      return;
+    }
+    session_->setConnectionState("Connecting");
+    pending_context_ = session_context();
+    auto resolved = [this, host, domain](const QHostInfo & info) {
+        if (session_->connectionState() != "Connecting") return;
+        if (pending_context_.isEmpty() || pending_context_ != session_context()) {
+          ensure_session_context();
+          return;
+        }
+        QList<QHostAddress> addresses;
+        for (const auto & address : info.addresses()) {
+          if (address.protocol() == QAbstractSocket::IPv4Protocol) addresses.append(address);
+        }
+        if (host != "localhost" && host != "127.0.0.1" && addresses.isEmpty()) {
+          session_->setDiscoveryRoute(QString("Host/network: DNS resolution failed for %1 (%2); ROS graph was not queried")
+            .arg(host, info.errorString()));
+          session_->setDiagnostics({"ROS graph: unavailable because the target host did not resolve"});
+          session_->setConnectionState("Failed: host resolution failed");
+          return;
+        }
+        try {
+          const QString directory = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/dds";
+          session_->setDiscoveryRoute(configure_ros_environment(host, domain, addresses, directory));
+          start_ros_connection();
+        } catch (const std::exception & error) {
+          session_->setDiagnostics({QString("Host/network setup failed · %1").arg(error.what()),
+            "ROS graph: not queried"});
+          session_->setConnectionState(QString("Failed: %1").arg(error.what()));
+        }
+      };
+    if (host == "localhost" || host == "127.0.0.1" || host == "::1") {
+      QHostInfo local;
+      resolved(local);
+    } else {
+      QHostInfo::lookupHost(host, this, resolved);
+    }
+  }
+
+  void start_ros_connection()
+  {
     try {
+      // DDS domain/profile are set by connect_ros() before this first init.
       if (!rclcpp::ok()) rclcpp::init(0, nullptr);
       ros_executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
       rviz_node_ = std::make_shared<rviz_common::ros_integration::RosNodeAbstraction>(
@@ -685,7 +938,8 @@ public:
       frame->loadDisplayConfig(session_->rvizConfigPath(config_override_));
       ros_spin_timer_.start(10);
       diagnosis_timer_.start(500);
-      connected_context_ = session_context();
+      connected_context_ = pending_context_.isEmpty() ? session_context() : pending_context_;
+      pending_context_.clear();
       session_->setConnectionState("Connected");
       session_->setDiagnostics(session_diagnostics());
     } catch (const std::exception & error) {
@@ -700,9 +954,12 @@ public:
       if (ros_executor_ && rviz_node_) ros_executor_->remove_node(rviz_node_->get_raw_node());
       ros_executor_.reset();
       rviz_node_.reset();
+      pending_context_.clear();
       connected_context_.clear();
       if (rclcpp::ok()) rclcpp::shutdown();
       session_->setDiagnostics({QString("Connection failed · %1").arg(error.what()),
+        "Host/network: DDS configuration completed; graph reachability is not confirmed",
+        "ROS graph: not queried",
         "External processes were not started or stopped"});
       session_->setConnectionState(QString("Failed: %1").arg(error.what()));
     }
@@ -723,6 +980,7 @@ public:
     rviz_node_.reset();
     connected_context_.clear();
     if (rclcpp::ok()) rclcpp::shutdown();
+    session_->setDiscoveryRoute(QString());
     session_->setDiagnostics({"Disconnected · external ROS launches and processes were left running"});
     session_->setConnectionState("Disconnected");
   }
@@ -730,6 +988,7 @@ public:
 private:
   QString context_;
   QString config_override_;
+  QString pending_context_;
   QString connected_context_;
   SessionController * session_;
   ProcessManager * process_manager_{nullptr};
@@ -766,6 +1025,8 @@ int main(int argc, char ** argv)
       // Exercises portable preset serialization through the session interface.
     } else if (arguments[i] == "--contract-test-rviz-session") {
       // Checks active-profile RViz selection, time source, and unavailable profile errors.
+    } else if (arguments[i] == "--contract-test-remote-discovery") {
+      // Exercises DDS environment setup without initializing ROS.
     } else if (arguments[i] == "--contract-test-process-manager") {
       // Exercises process ownership and captured output through a fake executable.
     } else if (arguments[i] == "--context" && i + 1 < arguments.size()) {
@@ -830,6 +1091,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("RViz session contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-remote-discovery")) {
+    if (!run_remote_discovery_contract_test()) {
+      qCritical("Remote discovery contract failed");
+      return 1;
+    }
+    qInfo("Remote discovery contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-process-manager")) {

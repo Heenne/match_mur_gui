@@ -13,10 +13,17 @@ Connection state is in memory only and always starts Disconnected. The shell
 does not start simulator or robot processes.
 
 Profiles can be edited and exported as versioned `.murpreset.json` bundles.
-Bundles include mode, target, robot, visualization choice, and optional local
+Bundles include mode, target host, ROS domain, robot, visualization choice, and optional local
 workspace/RViz config references. Import maps these references to local paths;
 blank mappings explicitly leave the references unassigned. The portable
 allowlist omits the personal last view, layout, log filters, and credentials.
+
+Connecting to a non-local target resolves its host asynchronously, sets the
+profile's ROS domain before `rclcpp::init()`, and adds the resolved IPv4
+addresses as Fast DDS direct peers. The Diagnosis view reports the configured
+route separately from ROS graph results; DNS resolution does not prove UDP
+reachability. VPN/LAN routing and firewall access for DDS traffic must already
+be available on the client and remote host.
 
 Build from a sourced ROS 2 Jazzy workspace:
 

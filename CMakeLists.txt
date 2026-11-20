@@ -8,7 +8,7 @@ ament_python_install_package(match_mur_gui)
 
 # Runnable native RViz docking prototype (Prototype B in gui_rewrite_spec.md).
 set(CMAKE_AUTOMOC ON)
-find_package(Qt5 REQUIRED COMPONENTS Widgets QuickWidgets)
+find_package(Qt5 REQUIRED COMPONENTS Widgets QuickWidgets Network)
 find_package(rclcpp REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
 find_package(controller_manager_msgs REQUIRED)
@@ -22,7 +22,7 @@ add_executable(mur_rviz_docking_prototype
   prototype/process_manager.cpp
 )
 target_compile_features(mur_rviz_docking_prototype PRIVATE cxx_std_17)
-target_link_libraries(mur_rviz_docking_prototype Qt5::Widgets Qt5::QuickWidgets)
+target_link_libraries(mur_rviz_docking_prototype Qt5::Widgets Qt5::QuickWidgets Qt5::Network)
 ament_target_dependencies(mur_rviz_docking_prototype ament_index_cpp controller_manager_msgs rclcpp rosgraph_msgs rviz_common std_msgs)
 install(TARGETS mur_rviz_docking_prototype DESTINATION lib/${PROJECT_NAME})
 
@@ -54,6 +54,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_qml_layout_prototype test/test_qml_layout_prototype.py)
   ament_add_pytest_test(test_gazebo_client test/test_gazebo_client.py)
   ament_add_pytest_test(test_session_shell test/test_session_shell.py)
+  ament_add_pytest_test(test_remote_discovery_config test/test_remote_discovery_config.py)
   ament_add_pytest_test(test_process_manager test/test_process_manager.py)
 endif()
 

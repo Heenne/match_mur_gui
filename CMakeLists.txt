@@ -10,15 +10,19 @@ ament_python_install_package(match_mur_gui)
 set(CMAKE_AUTOMOC ON)
 find_package(Qt5 REQUIRED COMPONENTS Widgets QuickWidgets)
 find_package(rclcpp REQUIRED)
+find_package(rosgraph_msgs REQUIRED)
+find_package(controller_manager_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(rviz_common REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 
 add_executable(mur_rviz_docking_prototype
   prototype/rviz_docking_main.cpp
+  prototype/ros_session_monitor.cpp
 )
 target_compile_features(mur_rviz_docking_prototype PRIVATE cxx_std_17)
 target_link_libraries(mur_rviz_docking_prototype Qt5::Widgets Qt5::QuickWidgets)
-ament_target_dependencies(mur_rviz_docking_prototype ament_index_cpp rclcpp rviz_common)
+ament_target_dependencies(mur_rviz_docking_prototype ament_index_cpp controller_manager_msgs rclcpp rosgraph_msgs rviz_common std_msgs)
 install(TARGETS mur_rviz_docking_prototype DESTINATION lib/${PROJECT_NAME})
 
 install(PROGRAMS

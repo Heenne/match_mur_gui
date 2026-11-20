@@ -53,7 +53,7 @@ Item {
             Layout.fillWidth: true
             ColumnLayout {
                 Label { text: "MuR Command Center"; color: window.foreground; font.pixelSize: 25; font.bold: true }
-                Label { text: session.mode + " · " + session.preset + " · ROS target · " + session.robot; color: window.muted }
+                Label { text: session.mode + " · " + session.preset + " · " + session.target + " · domain " + session.rosDomain + " · " + session.robot; color: window.muted }
             }
             Item { Layout.fillWidth: true }
             ComboBox { model: ["Simulation", "Hardware"]; currentIndex: model.indexOf(session.mode); onActivated: session.selectMode(currentText) }
@@ -78,8 +78,8 @@ Item {
             Layout.fillWidth: true
             StatusPill { label: session.mode }
             StatusPill { label: session.connectionState }
-            Button { text: session.connectionState === "Connected" ? "Connected" : "Connect"; enabled: session.connectionState !== "Connected"; onClicked: session.connectToTarget() }
-            Label { text: session.connectionState === "Disconnected" ? "No ROS connection · no processes started" : "Connection state · no processes started"; color: window.muted }
+            Button { text: session.connectionState === "Connected" ? "Disconnect" : "Connect"; enabled: session.connectionState !== "Connecting"; onClicked: session.connectionState === "Connected" ? session.disconnectFromTarget() : session.connectToTarget() }
+            Label { text: session.connectionState + " · existing processes are not managed"; color: window.muted }
             Item { Layout.fillWidth: true }
             Repeater {
                 model: window.pages
@@ -93,7 +93,30 @@ Item {
             Panel { heading: "Visualization" }
             Panel { heading: "Robot" }
             Panel { heading: "Processes" }
-            Panel { heading: "Diagnosis" }
+            Rectangle {
+                color: "#1b2933"; radius: 12; border.color: "#2b3c47"
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 18; spacing: 12
+                    Label { text: "ROS graph diagnosis"; color: window.foreground; font.pixelSize: 20; font.bold: true }
+                    Label { text: session.target + " · ROS domain " + session.rosDomain + " · " + session.robot + " · " + session.connectionState; color: window.muted }
+                    ScrollView {
+                        Layout.fillWidth: true; Layout.fillHeight: true
+                        clip: true
+                        Column {
+                            width: parent.width; spacing: 8
+                            Repeater {
+                                model: session.diagnostics
+                                delegate: Label {
+                                    required property string modelData
+                                    width: parent.width; text: modelData; color: window.foreground
+                                    wrapMode: Text.WrapAnywhere; font.pixelSize: 14
+                                    Accessible.name: modelData
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Panel { heading: "Logs" }
             Panel { heading: "Settings" }
         }

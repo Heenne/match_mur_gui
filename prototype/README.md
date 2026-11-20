@@ -28,10 +28,17 @@ be available on the client and remote host.
 Build from a sourced ROS 2 Jazzy workspace:
 
 ```bash
-colcon build --packages-select match_mur_gui --cmake-args -DBUILD_TESTING=ON
+colcon build --packages-up-to match_mur_gui --cmake-args -DBUILD_TESTING=ON
 source install/setup.bash
 ros2 run match_mur_gui mur_rviz_docking_prototype
 ```
+
+The workspace must also contain the `mir_srvs` interface package from
+`match-ROS/match_mobile_robotics_jazzy` at
+`mir_robot/mir_srvs`. The Debian build checks out this repository and builds
+that package as part of the dependency closure. The `.deb` bundles the
+generated `mir_srvs` runtime libraries and ament resources; the MiR light
+endpoints remain optional and are checked only when used.
 
 RViz loads the active preset's machine-local config path. Pass
 `--config /path/to/view.rviz` to override it for this launch. Connecting checks
@@ -41,8 +48,12 @@ before starting RViz. Changing preset, mode, target, robot, visualization, ROS
 domain, or effective config disconnects the old RViz session; connect again to
 attach to the newly selected context. The dock titles and diagnostics show the
 same active profile. The optional `--context` label is retained for the host's
-initial title. The GUI supports keys 1–7 to select Overview, Visualization,
-Robot, Processes, Diagnosis, Logs, and Settings.
+initial title. The GUI supports keys 1–8 to select Overview, Visualization,
+Robot, Processes, Diagnosis, Logs, Settings, and Mocap.
+
+The host remains a prototype; connecting confirms that its RViz node started,
+but does not prove reachability of every remote ROS endpoint. Full simulation
+and hardware launch flows are not yet wired to the shell.
 
 The Diagnosis view reports ROS graph endpoints and controller-manager state.
 In Hardware mode it also reads the selected robot's base/arm controller
@@ -71,6 +82,20 @@ domain. When auto-open is enabled, starting simulation also requests a ROS
 connection and waits for `/clock`; the client is not started if the server is
 not confirmed within 60 seconds. Client launch output and failure state appear
 in Processes. The app does not discover Gazebo servers through Gazebo Transport.
+
+The optional **Mocap** view reads raw `/qualisys/<robot>/pose`, map-frame
+`/qualisys_map/<robot>/pose`, `/tf_static` (`map -> mocap`), and the per-robot
+`localization_frozen` status. It displays pose/frame, receipt rate, data age,
+map/TF availability, and freeze state. Map output and localization freeze use
+the existing Qualisys `SetBool` services. The view can start the existing
+`match_mocap_ros2 qualisys_ssh_bridge` with editable SSH/QTM hosts and port;
+these settings persist in the user's application settings. A detected
+`qualisys_ssh_bridge` node or existing robot pose publisher is treated as an
+external bridge: the app reuses its data and never stops it. Only a bridge
+started as the named `Qualisys Mocap bridge` process by this app exposes the
+stop action. Bridge output and exit state are recorded with the other launch
+logs. Map/TF output is enabled for an app-started bridge, with the existing
+bridge's calibration validation deciding whether it is available.
 
 ## Remote simulation process prototype
 
@@ -116,3 +141,25 @@ pressed. Both actions report completion or failure in the panel and Logs.
 Hardware launch and these operations use SSH non-interactively; configure SSH
 keys or an agent yourself. Tests use injected adapters and a fake SSH executable;
 they do not connect to or start physical hardware.
+
+## MiR hardware controls
+
+The Robot view exposes MiR base jog and lights only in a connected Hardware
+session. Jog is disarmed on startup and after any profile, target, mode, robot,
+or connection change. The operator must arm it explicitly. Direction controls
+are hold-to-run, stop when released or when application/window focus is lost,
+and are capped at 0.15 m/s and 0.4 rad/s. The adapter prefers a discovered
+`/<robot>/cmd_vel` `geometry_msgs/msg/Twist` subscriber, then checks
+`/<robot>/cmd_vel_stamped` `geometry_msgs/msg/TwistStamped`; no verified
+subscriber means no motion command. Commands repeat at 10 Hz with a 250 ms DDS
+lifespan. The hardware controller does not infer that a robot is safe to move
+from graph discovery.
+
+Light effects call only the selected robot's
+`/<robot>/RGB_control/{rainbow_start,rainbow_stop,match_color}` services when
+they are discovered as `std_srvs/srv/Trigger`. Solid colors use
+`/<robot>/RGB_control/solid_color` with `mir_srvs/srv/ColorRGB`; response or
+service errors are shown in the panel. Missing or incompatible services are
+reported without trying another namespace. RGB values are clamped to 0–255.
+All jog and lighting behavior tests use a fake adapter; no physical MiR was
+connected during development.

@@ -11,9 +11,12 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt5 REQUIRED COMPONENTS Widgets QuickWidgets Network)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(mir_srvs REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
 find_package(controller_manager_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(tf2_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(actionlib_msgs REQUIRED)
@@ -34,12 +37,16 @@ add_executable(mur_rviz_docking_prototype
   prototype/log_panel.cpp
   prototype/simulation_base_jog.cpp
   prototype/simulation_base_jog.hpp
+  prototype/mir_hardware_control.cpp
+  prototype/mir_hardware_control.hpp
   prototype/goals_poses.cpp
   prototype/goals_poses.hpp
+  prototype/mocap_controller.cpp
+  prototype/mocap_controller.hpp
 )
 target_compile_features(mur_rviz_docking_prototype PRIVATE cxx_std_17)
 target_link_libraries(mur_rviz_docking_prototype Qt5::Widgets Qt5::QuickWidgets Qt5::Network)
-ament_target_dependencies(mur_rviz_docking_prototype action_msgs actionlib_msgs ament_index_cpp controller_manager_msgs geometry_msgs nav2_msgs rcl_interfaces rclcpp rosgraph_msgs rviz_common sensor_msgs std_msgs)
+ament_target_dependencies(mur_rviz_docking_prototype action_msgs actionlib_msgs ament_index_cpp controller_manager_msgs geometry_msgs mir_srvs nav2_msgs rcl_interfaces rclcpp rosgraph_msgs rviz_common sensor_msgs std_msgs std_srvs tf2_msgs)
 install(TARGETS mur_rviz_docking_prototype DESTINATION lib/${PROJECT_NAME})
 
 install(PROGRAMS
@@ -56,8 +63,12 @@ install(PROGRAMS
 if(BUILD_TESTING)
   add_test(NAME sim_base_jog_behavior COMMAND mur_rviz_docking_prototype --contract-test-sim-base-jog)
   set_tests_properties(sim_base_jog_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_test(NAME mir_hardware_control_behavior COMMAND mur_rviz_docking_prototype --contract-test-mir-hardware-control)
+  set_tests_properties(mir_hardware_control_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME goals_poses_behavior COMMAND mur_rviz_docking_prototype --contract-test-goals-poses)
   set_tests_properties(goals_poses_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_test(NAME mocap_monitor_behavior COMMAND mur_rviz_docking_prototype --contract-test-mocap)
+  set_tests_properties(mocap_monitor_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME hardware_status_behavior COMMAND mur_rviz_docking_prototype --contract-test-hardware-status)
   set_tests_properties(hardware_status_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME hardware_start_behavior COMMAND mur_rviz_docking_prototype --contract-test-hardware-start)
@@ -82,6 +93,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_process_manager test/test_process_manager.py)
   ament_add_pytest_test(test_log_panel test/test_log_panel.py)
   ament_add_pytest_test(test_hardware_start test/test_hardware_start.py)
+  ament_add_pytest_test(test_mir_hardware_control_ui test/test_mir_hardware_control_ui.py)
   ament_add_pytest_test(test_deb_package test/test_deb_package.py)
 endif()
 

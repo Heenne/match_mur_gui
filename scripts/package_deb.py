@@ -15,6 +15,11 @@ import xml.etree.ElementTree as ET
 PACKAGE = 'match-mur-gui'
 ROS_PACKAGE = 'match_mur_gui'
 ROS_DEPENDENCY_PREFIX = 'ros-jazzy-'
+BUNDLED_ROS_PACKAGES = {'mir_srvs'}
+MIR_SRVS_LIBRARIES = (
+    'libmir_srvs__rosidl_typesupport_cpp.so',
+    'libmir_srvs__rosidl_generator_c.so',
+)
 NATIVE_DEPENDENCIES = {
     'libqt5gui5', 'libqt5network5', 'libqt5qml5', 'libqt5quick5',
     'libqt5quickwidgets5', 'libqt5widgets5', 'python3-pyqt5',
@@ -35,6 +40,8 @@ def runtime_dependencies(package_xml: Path) -> list[str]:
             continue
         if key.startswith(('python3-', 'qml-module-', 'lib')) or key == 'qmlscene':
             dependencies.add(key)
+        elif key in BUNDLED_ROS_PACKAGES:
+            continue
         else:
             dependencies.add(ROS_DEPENDENCY_PREFIX + key.replace('_', '-'))
     dependencies.discard(ROS_DEPENDENCY_PREFIX + ROS_PACKAGE.replace('_', '-'))
@@ -100,6 +107,21 @@ def build_deb(source: Path, install_root: Path, output: Path, *, version: str,
         root = Path(temporary)
         shutil.copytree(package_lib, root / 'usr/lib' / ROS_PACKAGE)
         shutil.copytree(install_root / 'share', root / 'usr/share', dirs_exist_ok=True)
+        package_manifest = ET.parse(package_share / 'package.xml').getroot()
+        package_dependencies = {
+            (dependency.text or '').strip()
+            for field in ('depend', 'exec_depend')
+            for dependency in package_manifest.findall(field)
+        }
+        mir_srvs_source = install_root / 'share' / 'mir_srvs' / 'package.xml'
+        if mir_srvs_source.is_file():
+            for library in MIR_SRVS_LIBRARIES:
+                source_library = install_root / 'lib' / library
+                if not source_library.is_file():
+                    raise ValueError(f'Generierte mir_srvs-Laufzeitbibliothek fehlt: {source_library}')
+                shutil.copy2(source_library, root / 'usr/lib' / library)
+        elif 'mir_srvs' in package_dependencies:
+            raise ValueError('mir_srvs ist erforderlich, aber share/mir_srvs/package.xml fehlt im Installationsprefix')
         python_destination = root / 'usr/lib/python3/dist-packages'
         python_destination.mkdir(parents=True)
         shutil.copytree(python_site_packages / ROS_PACKAGE,

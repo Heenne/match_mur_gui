@@ -31,6 +31,7 @@
 #include <QCloseEvent>
 #include <QElapsedTimer>
 #include <QCoreApplication>
+#include <QEventLoop>
 #include <cstdlib>
 
 #include "ament_index_cpp/get_package_share_directory.hpp"
@@ -42,10 +43,12 @@
 #include "rviz_common/yaml_config_reader.hpp"
 #include "ros_session_monitor.hpp"
 #include "simulation_base_jog.hpp"
+#include "mir_hardware_control.hpp"
 #include "process_manager.hpp"
 #include "log_store.hpp"
 #include "log_panel.hpp"
 #include "goals_poses.hpp"
+#include "mocap_controller.hpp"
 #include "hardware_status.hpp"
 #include "hardware_start.hpp"
 #include "std_msgs/msg/string.hpp"
@@ -545,6 +548,158 @@ bool run_ros_session_monitor_contract_test()
   executor.remove_node(observer);
   executor.remove_node(fixture);
   rclcpp::shutdown();
+  return passed;
+}
+
+bool run_mocap_controller_contract_test()
+{
+  QTemporaryDir settings_directory;
+  if (!settings_directory.isValid()) return false;
+  const auto previous_settings_path = qgetenv("MUR_COMMAND_CENTER_SETTINGS");
+  qputenv("MUR_COMMAND_CENTER_SETTINGS",
+    QDir(settings_directory.path()).filePath("mocap-settings.ini").toLocal8Bit());
+  rclcpp::init(0, nullptr);
+  auto observer = std::make_shared<rclcpp::Node>("mocap_contract_observer");
+  auto fixture = std::make_shared<rclcpp::Node>("mocap_contract_fixture");
+  MocapController controller;
+  ProcessManager processes;
+  controller.setProcessManager(&processes);
+  controller.setNode(observer);
+  controller.setRobot("mur620d");
+
+  auto pose_publisher = fixture->create_publisher<geometry_msgs::msg::PoseStamped>(
+    "/qualisys/mur620d/pose", 10);
+  auto map_pose_publisher = fixture->create_publisher<geometry_msgs::msg::PoseStamped>(
+    "/qualisys_map/mur620d/pose", 10);
+  auto tf_publisher = fixture->create_publisher<tf2_msgs::msg::TFMessage>(
+    "/tf_static", rclcpp::QoS(1).transient_local());
+  auto frozen_publisher = fixture->create_publisher<std_msgs::msg::Bool>(
+    "/qualisys/mur620d/localization_frozen", rclcpp::QoS(1).transient_local());
+  int map_requests = 0;
+  int freeze_requests = 0;
+  auto map_service = fixture->create_service<std_srvs::srv::SetBool>(
+    "/qualisys/enable_map_output", [&map_requests](
+      const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+      std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
+      ++map_requests;
+      response->success = true;
+      response->message = request->data ? "enabled" : "disabled";
+    });
+  auto freeze_service = fixture->create_service<std_srvs::srv::SetBool>(
+    "/qualisys/mur620d/freeze_localization", [&freeze_requests](
+      const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+      std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
+      ++freeze_requests;
+      response->success = true;
+      response->message = request->data ? "frozen" : "resumed";
+    });
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(observer);
+  executor.add_node(fixture);
+  bool passed = false;
+  for (int attempt = 0; attempt < 100; ++attempt) {
+    geometry_msgs::msg::PoseStamped pose;
+    pose.header.frame_id = "mocap";
+    pose.pose.position.x = 1.25;
+    pose.pose.position.y = -0.5;
+    pose.pose.orientation.w = 1.0;
+    pose_publisher->publish(pose);
+    auto map_pose = pose;
+    map_pose.header.frame_id = "map";
+    map_pose_publisher->publish(map_pose);
+    tf2_msgs::msg::TFMessage tf;
+    geometry_msgs::msg::TransformStamped map_to_mocap;
+    map_to_mocap.header.frame_id = "map";
+    map_to_mocap.child_frame_id = "mocap";
+    tf.transforms.push_back(map_to_mocap);
+    tf_publisher->publish(tf);
+    std_msgs::msg::Bool frozen;
+    frozen.data = false;
+    frozen_publisher->publish(frozen);
+    executor.spin_some();
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    if (controller.poseStatus().startsWith("Receiving") &&
+      controller.frequencyHz() > 0.0 && controller.poseFrame() == "mocap" &&
+      controller.pose().contains("x 1.250 m") && controller.mapStatus().contains("TF active")) {
+      controller.setMapOutput(true);
+      controller.setFrozen(true);
+      for (int response_attempt = 0; response_attempt < 20; ++response_attempt) {
+        executor.spin_some();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      const bool external_not_taken_over = !controller.startBridge() &&
+        controller.bridgeState() == "Running · external bridge";
+      controller.stopBridge();
+      const bool fresh_pose_received = controller.dataAgeSeconds() >= 0.0 &&
+        controller.dataAgeSeconds() < 0.5;
+      const bool freeze_confirmed = controller.freezeStatus() == "Localization frozen" &&
+        controller.frozen();
+      bool managed_bridge_stopped = false;
+      QTemporaryDir fake_tools;
+      const auto fake_ros2_path = fake_tools.filePath("ros2");
+      QFile fake_ros2(fake_ros2_path);
+      const auto previous_path = qgetenv("PATH");
+      const auto fake_script = QByteArray("#!/bin/sh\necho fake ros2 \"$@\"\nexec sleep 30\n");
+      const bool fake_script_ready = fake_tools.isValid() && fake_ros2.open(QIODevice::WriteOnly) &&
+        fake_ros2.write(fake_script) == fake_script.size() && fake_ros2.setPermissions(
+          QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner |
+          QFileDevice::ReadGroup | QFileDevice::ExeGroup | QFileDevice::ReadOther | QFileDevice::ExeOther);
+      fake_ros2.close();
+      if (fake_script_ready) {
+        qputenv("PATH", (fake_tools.path() + ":" + QString::fromLocal8Bit(previous_path)).toLocal8Bit());
+        controller.setRobot("mur620b");
+        controller.setBridgeSettings("qualisys-host", "qtm-host", 22333);
+        const bool own_bridge_started = controller.startBridge();
+        QElapsedTimer bridge_timer;
+        bridge_timer.start();
+        while (own_bridge_started && bridge_timer.elapsed() < 3000 &&
+          !processes.log().contains("fake ros2 run match_mocap_ros2 qualisys_ssh_bridge")) {
+          QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+        const bool own_command_configured = processes.log().contains(
+          "ssh_host:=qualisys-host") && processes.log().contains("qtm_host:=qtm-host") &&
+          processes.log().contains("qtm_port:=22333");
+        controller.stopBridge();
+        bridge_timer.restart();
+        while (bridge_timer.elapsed() < 5000) {
+          QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+          bool still_running = false;
+          for (const auto & row : processes.processes()) {
+            const auto process = row.toMap();
+            if (process.value("name").toString() == "Qualisys Mocap bridge") {
+              still_running = process.value("state").toString() == "Running" ||
+                process.value("state").toString() == "Stopping";
+            }
+          }
+          if (!still_running) {
+            managed_bridge_stopped = true;
+            break;
+          }
+          std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        qputenv("PATH", previous_path);
+        bridge_timer.restart();
+        while (bridge_timer.elapsed() < 500) {
+          QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        managed_bridge_stopped = managed_bridge_stopped &&
+          controller.bridgeState() == "Stopped";
+        passed = own_bridge_started && own_command_configured && managed_bridge_stopped;
+      }
+      passed = passed && fresh_pose_received &&
+        map_requests == 1 && freeze_requests == 1 &&
+        freeze_confirmed &&
+        external_not_taken_over;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  }
+  executor.remove_node(observer);
+  executor.remove_node(fixture);
+  rclcpp::shutdown();
+  qputenv("MUR_COMMAND_CENTER_SETTINGS", previous_settings_path);
   return passed;
 }
 
@@ -1104,9 +1259,12 @@ public:
   : QMainWindow(), context_(context), config_override_(config_path), session_(new SessionController()),
     sim_base_jog_adapter_(std::make_shared<RosSimBaseJogAdapter>()),
     sim_base_jog_(new SimulationBaseJog(sim_base_jog_adapter_, this)),
+    mir_hardware_adapter_(std::make_shared<RosMirHardwareAdapter>()),
+    mir_hardware_control_(new MirHardwareControl(mir_hardware_adapter_, this)),
     goals_poses_adapter_(std::make_shared<RosGoalsPosesAdapter>()),
     goals_poses_(new GoalsPoses(goals_poses_adapter_,
-      QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/poses.json", this))
+      QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/poses.json", this)),
+    mocap_(new MocapController(this))
   {
     setWindowTitle(QString("MuR Command Center · %1").arg(context_));
     resize(1440, 900);
@@ -1117,7 +1275,11 @@ public:
     command_center->rootContext()->setContextProperty("session", session_);
     command_center->rootContext()->setContextProperty("simBaseJog", sim_base_jog_);
     command_center->rootContext()->setContextProperty("goalsPoses", goals_poses_);
+    command_center->rootContext()->setContextProperty("mirHardwareControl", mir_hardware_control_);
+    mir_hardware_control_->setContext(session_->robot(), session_->mode(), session_->target(), false);
+    command_center->rootContext()->setContextProperty("mocap", mocap_);
     process_manager_ = new ProcessManager(this);
+    mocap_->setProcessManager(process_manager_);
     command_center->rootContext()->setContextProperty("processes", process_manager_);
     log_store_ = new LogStore(this);
     process_manager_->setLogStore(log_store_);
@@ -1137,11 +1299,11 @@ public:
     connect(&diagnosis_timer_, &QTimer::timeout, this, &PrototypeWindow::refresh_diagnosis);
     connect(session_, &SessionController::connectRequested, this, [this]() { connect_ros(); });
     connect(session_, &SessionController::disconnectRequested, this, [this]() { disconnect_ros(); });
-    for (int index = 0; index < 7; ++index) {
+    for (int index = 0; index < 8; ++index) {
       auto * shortcut = new QShortcut(QKeySequence(QString::number(index + 1)), this);
       shortcut->setContext(Qt::WidgetWithChildrenShortcut);
       connect(shortcut, &QShortcut::activated, this, [this, index]() {
-        static const QStringList views = {"Overview", "Visualization", "Robot", "Processes", "Diagnosis", "Logs", "Settings"};
+        static const QStringList views = {"Overview", "Visualization", "Robot", "Processes", "Diagnosis", "Logs", "Settings", "Mocap"};
         session_->selectView(views[index]);
       });
     }
@@ -1150,8 +1312,11 @@ public:
       if (hardware_start_) hardware_start_->setContext(session_->preset(), session_->mode(),
         session_->target(), session_->rosDomain(), session_->robot(), session_->connectionState(),
         session_->workspacePath(), "");
+      mocap_->setRobot(session_->robot());
       goals_poses_->setConnected(session_->connectionState() == "Connected" &&
         (session_->mode() == "Hardware" || session_->mode() == "Simulation"));
+      mir_hardware_control_->setContext(session_->robot(), session_->mode(), session_->target(),
+        session_->connectionState() == "Connected");
       setWindowTitle(QString("MuR Command Center · %1 · %2 · %3")
         .arg(session_->mode(), session_->preset(), session_->robot()));
       if (rviz_dock_) rviz_dock_->setWindowTitle("Visualisierung · " + session_label());
@@ -1297,7 +1462,9 @@ public:
       rviz_node_->get_raw_node()->set_parameter(
         rclcpp::Parameter("use_sim_time", session_->useSimTime()));
       sim_base_jog_adapter_->setNode(rviz_node_->get_raw_node());
+      mir_hardware_adapter_->setNode(rviz_node_->get_raw_node());
       goals_poses_adapter_->setNode(rviz_node_->get_raw_node());
+      mocap_->setNode(rviz_node_->get_raw_node());
       goals_poses_->setConnected(session_->mode() == "Hardware" || session_->mode() == "Simulation");
       ros_executor_->add_node(rviz_node_->get_raw_node());
       session_monitor_ = std::make_unique<RosSessionMonitor>(rviz_node_->get_raw_node(), log_store_);
@@ -1339,7 +1506,9 @@ public:
       ros_executor_.reset();
       rviz_node_.reset();
       sim_base_jog_adapter_->setNode({});
+      mir_hardware_adapter_->setNode({});
       goals_poses_adapter_->setNode({});
+      mocap_->setNode({});
       goals_poses_->setConnected(false);
       pending_context_.clear();
       connected_context_.clear();
@@ -1355,6 +1524,7 @@ public:
   void disconnect_ros()
   {
     sim_base_jog_->stop("ROS disconnected");
+    mir_hardware_control_->stop("ROS disconnected");
     ros_spin_timer_.stop();
     diagnosis_timer_.stop();
     if (rviz_dock_) {
@@ -1363,12 +1533,14 @@ public:
       rviz_dock_ = nullptr;
     }
     session_monitor_.reset();
+    mocap_->setNode({});
     session_->setSimulationServerAvailable(false);
     log_store_->append("ROS /rosout", "WARN", "ROS session disconnected; live /rosout messages are unavailable.");
     if (ros_executor_ && rviz_node_) ros_executor_->remove_node(rviz_node_->get_raw_node());
     ros_executor_.reset();
     rviz_node_.reset();
     sim_base_jog_adapter_->setNode({});
+    mir_hardware_adapter_->setNode({});
     goals_poses_adapter_->setNode({});
     goals_poses_->setConnected(false);
     pending_context_.clear();
@@ -1383,6 +1555,7 @@ protected:
   void closeEvent(QCloseEvent * event) override
   {
     sim_base_jog_->stop("window closed");
+    mir_hardware_control_->stop("window closed");
     if (rviz_node_) disconnect_ros();
     event->accept();
   }
@@ -1395,10 +1568,13 @@ private:
   SessionController * session_;
   std::shared_ptr<RosSimBaseJogAdapter> sim_base_jog_adapter_;
   SimulationBaseJog * sim_base_jog_;
+  std::shared_ptr<RosMirHardwareAdapter> mir_hardware_adapter_;
+  MirHardwareControl * mir_hardware_control_;
   std::shared_ptr<RosGoalsPosesAdapter> goals_poses_adapter_;
   GoalsPoses * goals_poses_;
   std::shared_ptr<SshHardwareStartAdapter> hardware_start_adapter_;
   HardwareStartController * hardware_start_{nullptr};
+  MocapController * mocap_;
   ProcessManager * process_manager_{nullptr};
   LogStore * log_store_{nullptr};
   LogPanel * log_panel_{nullptr};
@@ -1443,8 +1619,12 @@ int main(int argc, char ** argv)
       // Checks active-profile RViz selection, time source, and unavailable profile errors.
     } else if (arguments[i] == "--contract-test-sim-base-jog") {
       // Exercises hold-to-run behavior against an isolated fake ROS adapter.
+    } else if (arguments[i] == "--contract-test-mir-hardware-control") {
+      // Exercises hardware jog and MiR light actions through a fake ROS adapter.
     } else if (arguments[i] == "--contract-test-goals-poses") {
       // Exercises pose CRUD, stale-pose rejection, and selected-robot routing through a fake adapter.
+    } else if (arguments[i] == "--contract-test-mocap") {
+      // Exercises Qualisys status, map output, freeze/resume, and external bridge ownership with a local ROS graph.
     } else if (arguments[i] == "--contract-test-remote-discovery") {
       // Exercises DDS environment setup without initializing ROS.
     } else if (arguments[i] == "--contract-test-process-manager") {
@@ -1549,12 +1729,28 @@ int main(int argc, char ** argv)
     qInfo("Simulation base jog contract passed");
     return 0;
   }
+  if (arguments.contains("--contract-test-mir-hardware-control")) {
+    if (!run_mir_hardware_control_contract_test()) {
+      qCritical("MiR hardware control contract failed");
+      return 1;
+    }
+    qInfo("MiR hardware control contract passed");
+    return 0;
+  }
   if (arguments.contains("--contract-test-goals-poses")) {
     if (!run_goals_poses_contract_test()) {
       qCritical("Goals and poses contract failed");
       return 1;
     }
     qInfo("Goals and poses contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-mocap")) {
+    if (!run_mocap_controller_contract_test()) {
+      qCritical("Mocap controller contract failed");
+      return 1;
+    }
+    qInfo("Mocap controller contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-remote-discovery")) {

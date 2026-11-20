@@ -28,7 +28,7 @@
   <exec_depend>ewellix_interfaces</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
-  <exec_depend>mir_srvs</exec_depend>
+  <depend>mir_srvs</depend>
   <exec_depend>mur_control</exec_depend>
   <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>moveit_py</exec_depend>
@@ -40,9 +40,9 @@
   <exec_depend>rclpy</exec_depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
-  <exec_depend>std_srvs</exec_depend>
+  <depend>std_srvs</depend>
+  <depend>tf2_msgs</depend>
   <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>tf2_msgs</exec_depend>
   <exec_depend>ur_dashboard_msgs</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>

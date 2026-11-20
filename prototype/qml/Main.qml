@@ -10,7 +10,7 @@ Item {
     height: 900
     implicitWidth: 1440
     implicitHeight: 900
-    property var pages: ["Overview", "Visualization", "Robot", "Processes", "Diagnosis", "Logs", "Settings"]
+    property var pages: ["Overview", "Visualization", "Robot", "Processes", "Diagnosis", "Logs", "Settings", "Mocap"]
     property color muted: "#a8bac5"
     property color foreground: "#f2f6f8"
 
@@ -23,7 +23,7 @@ Item {
     function selectPage(page) { session.selectView(page) }
 
     Keys.onPressed: {
-        if (event.key >= Qt.Key_1 && event.key <= Qt.Key_7) {
+        if (event.key >= Qt.Key_1 && event.key <= Qt.Key_8) {
             selectPage(pages[event.key - Qt.Key_1]); event.accepted = true
         }
     }
@@ -102,6 +102,11 @@ Item {
                         spacing: 12
                         Panels.SimBaseJog { Layout.fillWidth: true; Layout.preferredHeight: 260; visible: session.mode === "Simulation" }
                         Panels.HardwareStart { Layout.fillWidth: true; Layout.preferredHeight: 680; workflow: hardwareStart; sessionController: session; processManager: processes; visible: session.mode === "Hardware" }
+                        Panels.MirHardwareControl {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 470
+                            visible: session.mode === "Hardware"
+                        }
                         Panels.GoalsPoses { Layout.fillWidth: true; Layout.preferredHeight: 440; goals: goalsPoses; sessionController: session }
                     }
                 }
@@ -154,6 +159,7 @@ Item {
                     Item { Layout.fillHeight: true }
                 }
             }
+            Panels.MocapPanel { controller: mocap; sessionController: session }
         }
         Label { text: "Disconnected · status is shown by text and color"; color: "#f0b44d"; Accessible.name: "Disconnected" }
     }

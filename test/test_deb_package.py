@@ -22,6 +22,13 @@ def test_deb_has_menu_entry_icon_launcher_and_ros_dependencies(tmp_path):
     (lib / 'general_mur_gui.py').write_text('#!/usr/bin/env python3\n')
     (python_package / '__init__.py').write_text('')
     (share / 'package.xml').write_text((ROOT / 'package.xml').read_text())
+    mir_share = install_root / 'share/mir_srvs'
+    mir_share.mkdir(parents=True)
+    (mir_share / 'package.xml').write_text('<package><name>mir_srvs</name></package>')
+    (install_root / 'share/ament_index/resource_index/packages').mkdir(parents=True)
+    (install_root / 'share/ament_index/resource_index/packages/mir_srvs').write_text('')
+    for library in PACKAGE.MIR_SRVS_LIBRARIES:
+        (install_root / 'lib' / library).write_text('fake shared library')
     output = tmp_path / 'match-mur-gui.deb'
 
     PACKAGE.build_deb(ROOT, install_root, output, version='1.2.3', architecture='amd64')
@@ -33,6 +40,10 @@ def test_deb_has_menu_entry_icon_launcher_and_ros_dependencies(tmp_path):
     assert './usr/share/icons/hicolor/128x128/apps/mur-base-gui.png' in contents
     assert './usr/lib/match_mur_gui/general_mur_gui.py' in contents
     assert './usr/lib/python3/dist-packages/match_mur_gui/__init__.py' in contents
+    for library in PACKAGE.MIR_SRVS_LIBRARIES:
+        assert f'./usr/lib/{library}' in contents
+    assert './usr/share/mir_srvs/package.xml' in contents
+    assert './usr/share/ament_index/resource_index/packages/mir_srvs' in contents
 
     fields = subprocess.run(['dpkg-deb', '--field', str(output)], check=True,
                             capture_output=True, text=True).stdout
@@ -42,6 +53,7 @@ def test_deb_has_menu_entry_icon_launcher_and_ros_dependencies(tmp_path):
     assert 'ros-jazzy-rclpy' in fields
     assert 'ros-jazzy-ewellix-interfaces' in fields
     assert 'qml-module-qtquick-controls2' in fields
+    assert 'ros-jazzy-mir-srvs' not in fields
 
     extracted = tmp_path / 'extracted'
     subprocess.run(['dpkg-deb', '--extract', str(output), str(extracted)], check=True)

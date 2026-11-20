@@ -6,8 +6,6 @@ Item {
     id: window
     width: 1440
     height: 900
-    minimumWidth: 840
-    minimumHeight: 560
     implicitWidth: 1440
     implicitHeight: 900
     property var pages: ["Overview", "Visualization", "Robot", "Processes", "Diagnosis", "Logs", "Settings"]
@@ -16,7 +14,8 @@ Item {
 
     function statusColor(status) {
         if (status === "Disconnected") return "#f0b44d"
-        if (status === "Error") return "#f07178"
+        if (status.indexOf("Failed") === 0 || status === "Error") return "#f07178"
+        if (status === "Connecting") return "#f0b44d"
         return "#45d6a8"
     }
     function selectPage(page) { session.selectView(page) }
@@ -54,12 +53,14 @@ Item {
             Layout.fillWidth: true
             ColumnLayout {
                 Label { text: "MuR Command Center"; color: window.foreground; font.pixelSize: 25; font.bold: true }
-            Label { text: session.mode + " · " + session.preset + " · ROS target · " + session.robot; color: window.muted }
+                Label { text: session.mode + " · " + session.preset + " · ROS target · " + session.robot; color: window.muted }
             }
             Item { Layout.fillWidth: true }
+            ComboBox { model: ["Simulation", "Hardware"]; currentIndex: model.indexOf(session.mode); onActivated: session.selectMode(currentText) }
             ComboBox { model: session.presets; currentIndex: model.indexOf(session.preset); onActivated: session.selectPreset(currentText) }
             Button { text: "New preset"; onClicked: presetDialog.open() }
             ComboBox {
+                id: targetCombo
                 editable: true
                 model: ["localhost", "lab-host"]
                 currentIndex: model.indexOf(session.target)
@@ -67,13 +68,18 @@ Item {
                 onActivated: session.selectTarget(currentText)
                 onAccepted: session.selectTarget(editText)
             }
+            Connections {
+                target: session
+                function onChanged() { targetCombo.editText = session.target }
+            }
             ComboBox { model: ["mur620d", "mur620b", "mur620c"]; currentIndex: model.indexOf(session.robot); onActivated: session.selectRobot(currentText) }
         }
         RowLayout {
             Layout.fillWidth: true
             StatusPill { label: session.mode }
-            StatusPill { label: "Disconnected" }
-            Label { text: "No ROS connection or processes are started automatically"; color: window.muted }
+            StatusPill { label: session.connectionState }
+            Button { text: session.connectionState === "Connected" ? "Connected" : "Connect"; enabled: session.connectionState !== "Connected"; onClicked: session.connectToTarget() }
+            Label { text: session.connectionState === "Disconnected" ? "No ROS connection · no processes started" : "Connection state · no processes started"; color: window.muted }
             Item { Layout.fillWidth: true }
             Repeater {
                 model: window.pages

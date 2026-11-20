@@ -1,15 +1,30 @@
-# QML layout prototype
+# Native command center host
 
-Run `./prototype/run_layout_prototype.sh` on a Qt 5.15 desktop with Qt Quick Controls 2 installed. This sample-data-only window does not connect to ROS.
+`rviz_docking_main.cpp` is the native Qt Widgets host. It embeds
+`qml/Main.qml` in a `QQuickWidget`, exposes the `SessionController` as the
+`session` QML context object, and keeps RViz in its own dock. The session shell
+is visible before any ROS initialization. Choosing **Connect** initializes the
+ROS node and creates the RViz dock.
 
-The header keeps mode, preset, robot and connection state visible in every layout. The warning points to the affected Bringup log. Select either log tab to inspect its independent sample output. The top buttons compare the three arrangements:
+Session state is stored by `QSettings` in the user's application config
+directory (`MATCH/MuRCommandCenter`), outside the source tree. Preset, target,
+robot, mode, and last view are stored per preset. A new preset opens Overview.
+Connection state is in memory only and always starts Disconnected. The shell
+does not start simulator or robot processes.
 
-| Variant | Layout | Best fit |
-| --- | --- | --- |
-| Trial field | Robot state, visualization and logs in one row | Quick status checks and operator focus |
-| Development | Large visualization, status alongside, logs below | Iterating on visualization while retaining process output |
-| Split work | Visualization and logs share the available width | Following a visualization and a specific process log together |
+Build from a sourced ROS 2 Jazzy workspace:
 
-**Selected direction: Development.** It gives the ROS visualization the most room while keeping both logs accessible in the same window; the Trial field variant remains one click away when status and operation matter more. The warning is pinned above the workspace in all variants, and its wording names the Bringup log directly. The mode, preset and robot controls update the shared session context without changing the selected layout.
+```bash
+colcon build --packages-select match_mur_gui --cmake-args -DBUILD_TESTING=ON
+source install/setup.bash
+ros2 run match_mur_gui mur_rviz_docking_prototype
+```
 
-The status labels are sample values: Connected and Running describe the session, while Base online and Left arm ready describe robot components. Warning is amber and links to a concrete cause. No action in this prototype controls a robot.
+Pass an existing RViz config with `--config /path/to/view.rviz`. The optional
+`--context` label is shown in the RViz dock title. The GUI supports keys 1–7 to
+select Overview, Visualization, Robot, Processes, Diagnosis, Logs, and
+Settings.
+
+The host remains a prototype; ROS graph connection feedback is limited to the
+RViz node starting. No simulation or hardware launch process is wired to the
+shell.

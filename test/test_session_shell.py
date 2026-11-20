@@ -33,7 +33,7 @@ def test_new_presets_default_to_overview_and_qml_is_embedded_in_native_host():
     assert 'setValue(group + "view", "Overview")' in host
     assert "QQuickWidget" in host and 'setContextProperty("session", session_)' in host
     assert qml.startswith("import QtQuick")
-    assert "Key_1" in qml and "Key_7" in qml
+    assert "Key_1" in qml and "Key_8" in qml
     assert "New preset" in qml
 
 

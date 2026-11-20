@@ -2,7 +2,7 @@ import QtQuick 2.12
 import QtQuick.Controls 2.5
 import QtQuick.Layouts 1.12
 import QtQuick.Dialogs 1.3 as NativeDialogs
-import "."
+import "." as Panels
 
 Item {
     id: window
@@ -93,8 +93,16 @@ Item {
             currentIndex: Math.max(0, window.pages.indexOf(session.view))
             Panel { heading: "Overview" }
             Panel { heading: "Visualization" }
-            Panel { heading: "Robot" }
-            ProcessesPanel { processManager: processes }
+            Rectangle {
+                color: "transparent"
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 12
+                    Panels.SimBaseJog { Layout.fillWidth: true; Layout.fillHeight: true; visible: session.mode === "Simulation" }
+                    Panel { Layout.fillWidth: true; Layout.fillHeight: true; heading: "Robot actions are unavailable in this prototype"; visible: session.mode !== "Simulation" }
+                }
+            }
+            Panels.ProcessesPanel { processManager: processes }
             Rectangle {
                 color: "#1b2933"; radius: 12; border.color: "#2b3c47"
                 ColumnLayout {

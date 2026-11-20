@@ -10,6 +10,7 @@ ament_python_install_package(match_mur_gui)
 set(CMAKE_AUTOMOC ON)
 find_package(Qt5 REQUIRED COMPONENTS Widgets QuickWidgets Network)
 find_package(rclcpp REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
 find_package(controller_manager_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -20,10 +21,12 @@ add_executable(mur_rviz_docking_prototype
   prototype/rviz_docking_main.cpp
   prototype/ros_session_monitor.cpp
   prototype/process_manager.cpp
+  prototype/simulation_base_jog.cpp
+  prototype/simulation_base_jog.hpp
 )
 target_compile_features(mur_rviz_docking_prototype PRIVATE cxx_std_17)
 target_link_libraries(mur_rviz_docking_prototype Qt5::Widgets Qt5::QuickWidgets Qt5::Network)
-ament_target_dependencies(mur_rviz_docking_prototype ament_index_cpp controller_manager_msgs rclcpp rosgraph_msgs rviz_common std_msgs)
+ament_target_dependencies(mur_rviz_docking_prototype ament_index_cpp controller_manager_msgs geometry_msgs rclcpp rosgraph_msgs rviz_common std_msgs)
 install(TARGETS mur_rviz_docking_prototype DESTINATION lib/${PROJECT_NAME})
 
 install(PROGRAMS
@@ -38,6 +41,8 @@ install(PROGRAMS
 )
 
 if(BUILD_TESTING)
+  add_test(NAME sim_base_jog_behavior COMMAND mur_rviz_docking_prototype --contract-test-sim-base-jog)
+  set_tests_properties(sim_base_jog_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_cartesian_startup test/test_cartesian_startup.py)
   ament_add_pytest_test(test_cartesian_jog test/test_cartesian_jog.py)

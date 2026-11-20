@@ -50,6 +50,7 @@
 #include "goals_poses.hpp"
 #include "mocap_controller.hpp"
 #include "hardware_status.hpp"
+#include "lift_controller.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "std_msgs/msg/float32.hpp"
 #include "sensor_msgs/msg/battery_state.hpp"
@@ -1434,6 +1435,8 @@ int main(int argc, char ** argv)
       // Exercises the public monitor output against a live in-process ROS graph.
     } else if (arguments[i] == "--contract-test-hardware-status") {
       // Exercises missing, current, and stale telemetry through an injected clock and message seam.
+    } else if (arguments[i] == "--contract-test-lift-controller") {
+      // Exercises height freshness, selected-side routing, bounds, and lift stop through a fake adapter.
     } else if (arguments[i] == "--contract-test-portable-presets") {
       // Exercises portable preset serialization through the session interface.
     } else if (arguments[i] == "--contract-test-gazebo-preset") {
@@ -1510,6 +1513,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Hardware status contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-lift-controller")) {
+    if (!run_lift_controller_contract_test()) {
+      qCritical("Lift controller contract failed");
+      return 1;
+    }
+    qInfo("Lift controller contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-portable-presets")) {

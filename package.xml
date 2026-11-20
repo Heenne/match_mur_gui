@@ -13,6 +13,7 @@
   <build_depend>qtbase5-dev</build_depend>
   <build_depend>qtdeclarative5-dev</build_depend>
   <depend>controller_manager_msgs</depend>
+  <depend>ewellix_interfaces</depend>
   <depend>rclcpp</depend>
   <depend>rviz_common</depend>
   <depend>geometry_msgs</depend>
@@ -25,7 +26,6 @@
   <depend>action_msgs</depend>
   <exec_depend>actionlib_msgs</exec_depend>
   <exec_depend>moveit_msgs</exec_depend>
-  <exec_depend>ewellix_interfaces</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
   <depend>mir_srvs</depend>

@@ -15,12 +15,6 @@ Rectangle {
         }
         return "Stopped"
     }
-    function simulationServerReady() {
-        // The managed launch is authoritative for the local server before /clock
-        // becomes visible through a ROS monitor.
-        return session.simulationServerAvailable || processState("MUR620 simulation") === "Running"
-    }
-
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 18
@@ -41,12 +35,13 @@ Rectangle {
                         root.waitingForSimulationServer = true
                         root.autoOpenAttempts = 0
                         root.autoOpenTimedOut = false
+                        if (session.connectionState !== "Connected") session.connectToTarget()
                     }
                 }
             }
             Button {
                 text: root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" ? "Close Gazebo world view" : "Open Gazebo world view"
-                enabled: root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" || root.simulationServerReady()
+                enabled: root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" || session.simulationServerAvailable
                 onClicked: {
                     if (root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting") root.processManager.stopProcess("Gazebo world view")
                     else root.processManager.startGazeboView()
@@ -56,8 +51,8 @@ Rectangle {
         }
         Label {
             Layout.fillWidth: true
-            text: root.simulationServerReady() ? (session.simulationServerAvailable ? "Simulation server available (/clock publisher detected)" : "Simulation launch is running in this app; Gazebo client is managed separately") : (root.autoOpenTimedOut ? "Simulation server was not detected within 60 seconds; Gazebo client was not started." : "Gazebo world view needs a running simulation server. Connect to the simulation ROS domain to check /clock.")
-            color: root.simulationServerReady() ? "#45d6a8" : "#a8bac5"
+            text: session.simulationServerAvailable ? "Simulation server available (/clock publisher detected)" : (root.autoOpenTimedOut ? "Server was not confirmed by /clock within 60 seconds; Gazebo client was not started." : "Gazebo world view needs a confirmed /clock publisher. Connect to the simulation ROS domain.")
+            color: session.simulationServerAvailable ? "#45d6a8" : "#a8bac5"
             wrapMode: Text.WordWrap
         }
         Timer {
@@ -66,7 +61,7 @@ Rectangle {
             repeat: true
             running: root.waitingForSimulationServer
             onTriggered: {
-                if (root.simulationServerReady()) {
+                if (session.simulationServerAvailable) {
                     root.waitingForSimulationServer = false
                     if (root.processState("Gazebo world view") !== "Running" && root.processState("Gazebo world view") !== "Starting") root.processManager.startGazeboView()
                 } else if (++root.autoOpenAttempts >= 120) {
@@ -102,6 +97,7 @@ Rectangle {
                                 Label { text: modelData.exitCode >= 0 ? "exit " + modelData.exitCode : ""; color: "#a8bac5" }
                                 Item { Layout.fillWidth: true }
                                 Button { text: "Stop"; enabled: modelData.state === "Running" || modelData.state === "Starting"; onClicked: root.processManager.stopProcess(modelData.name) }
+                                Button { text: "Open log"; onClicked: { logs.showSource(root.processManager.logSource(modelData.name)); logs.raiseDock() } }
                             }
                             TextArea {
                                 Layout.fillWidth: true

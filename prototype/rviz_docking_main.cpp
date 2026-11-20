@@ -43,6 +43,8 @@
 #include "ros_session_monitor.hpp"
 #include "simulation_base_jog.hpp"
 #include "process_manager.hpp"
+#include "log_store.hpp"
+#include "log_panel.hpp"
 #include "std_msgs/msg/string.hpp"
 
 namespace
@@ -854,6 +856,12 @@ public:
     command_center->rootContext()->setContextProperty("simBaseJog", sim_base_jog_);
     process_manager_ = new ProcessManager(this);
     command_center->rootContext()->setContextProperty("processes", process_manager_);
+    log_store_ = new LogStore(this);
+    process_manager_->setLogStore(log_store_);
+    log_store_->append("ROS /rosout", "WARN",
+      "Live ROS logs are unavailable until this session connects to a ROS graph.");
+    log_panel_ = new LogPanel(log_store_);
+    command_center->rootContext()->setContextProperty("logs", log_panel_);
     command_center->setSource(QUrl::fromLocalFile(qml_path));
     setCentralWidget(command_center);
     connect(&ros_spin_timer_, &QTimer::timeout, this, &PrototypeWindow::spin_ros);
@@ -875,19 +883,19 @@ public:
         .arg(session_->mode(), session_->preset(), session_->robot()));
       if (rviz_dock_) rviz_dock_->setWindowTitle("Visualisierung · " + session_label());
       if (logs_dock_) logs_dock_->setWindowTitle("Logs · " + session_label());
+      if (log_panel_) log_panel_->setSessionLabel(session_label());
       statusBar()->showMessage(QString("%1 · %2 · %3 · %4 · No processes started")
         .arg(session_->target(), session_->robot(), session_->mode(), session_->connectionState()));
     });
 
-    auto * log_view = new QLabel(
-      "Prototype log view\n\n"
-      "This dock is independent of RViz. Replace it with the session log view\n"
-      "when the host shell is integrated into the MuR application.");
-    log_view->setWordWrap(true);
     logs_dock_ = new QDockWidget("Logs · " + session_label(), this);
     logs_dock_->setObjectName("logsDock");
-    logs_dock_->setWidget(log_view);
+    logs_dock_->setWidget(log_panel_);
     logs_dock_->setAllowedAreas(Qt::AllDockWidgetAreas);
+    logs_dock_->setFeatures(QDockWidget::DockWidgetClosable |
+      QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+    log_panel_->setDock(logs_dock_);
+    log_panel_->setSessionLabel(session_label());
     addDockWidget(Qt::BottomDockWidgetArea, logs_dock_);
 
     statusBar()->showMessage(QString("%1 · %2 · Disconnected · No processes started")
@@ -1017,7 +1025,9 @@ public:
         rclcpp::Parameter("use_sim_time", session_->useSimTime()));
       sim_base_jog_adapter_->setNode(rviz_node_->get_raw_node());
       ros_executor_->add_node(rviz_node_->get_raw_node());
-      session_monitor_ = std::make_unique<RosSessionMonitor>(rviz_node_->get_raw_node());
+      session_monitor_ = std::make_unique<RosSessionMonitor>(rviz_node_->get_raw_node(), log_store_);
+      log_store_->append("ROS /rosout", "INFO",
+        "Subscribed to /rosout; only messages published on the connected ROS graph are available.");
       auto * frame = new rviz_common::VisualizationFrame(rviz_node_);
       frame->setApp(qApp);
       frame->setSplashPath("");
@@ -1077,6 +1087,7 @@ public:
     }
     session_monitor_.reset();
     session_->setSimulationServerAvailable(false);
+    log_store_->append("ROS /rosout", "WARN", "ROS session disconnected; live /rosout messages are unavailable.");
     if (ros_executor_ && rviz_node_) ros_executor_->remove_node(rviz_node_->get_raw_node());
     ros_executor_.reset();
     rviz_node_.reset();
@@ -1106,6 +1117,8 @@ private:
   std::shared_ptr<RosSimBaseJogAdapter> sim_base_jog_adapter_;
   SimulationBaseJog * sim_base_jog_;
   ProcessManager * process_manager_{nullptr};
+  LogStore * log_store_{nullptr};
+  LogPanel * log_panel_{nullptr};
   std::shared_ptr<rviz_common::ros_integration::RosNodeAbstraction> rviz_node_;
   std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> ros_executor_;
   std::unique_ptr<RosSessionMonitor> session_monitor_;
@@ -1147,6 +1160,8 @@ int main(int argc, char ** argv)
       // Exercises DDS environment setup without initializing ROS.
     } else if (arguments[i] == "--contract-test-process-manager") {
       // Exercises process ownership and captured output through a fake executable.
+    } else if (arguments[i] == "--contract-test-log-store") {
+      // Exercises filtering, exports, redaction, and process-to-log source selection.
     } else if (arguments[i] == "--context" && i + 1 < arguments.size()) {
       context = arguments[++i];
     } else if (arguments[i] == "--help" || arguments[i] == "-h") {
@@ -1241,6 +1256,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Process manager contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-log-store")) {
+    if (!run_log_store_contract_test()) {
+      qCritical("Log store contract failed");
+      return 1;
+    }
+    qInfo("Log store contract passed");
     return 0;
   }
   PrototypeWindow window(config_path, context, qml_path);

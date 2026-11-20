@@ -14,6 +14,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
 find_package(controller_manager_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(rviz_common REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 
@@ -21,12 +22,14 @@ add_executable(mur_rviz_docking_prototype
   prototype/rviz_docking_main.cpp
   prototype/ros_session_monitor.cpp
   prototype/process_manager.cpp
+  prototype/log_store.cpp
+  prototype/log_panel.cpp
   prototype/simulation_base_jog.cpp
   prototype/simulation_base_jog.hpp
 )
 target_compile_features(mur_rviz_docking_prototype PRIVATE cxx_std_17)
 target_link_libraries(mur_rviz_docking_prototype Qt5::Widgets Qt5::QuickWidgets Qt5::Network)
-ament_target_dependencies(mur_rviz_docking_prototype ament_index_cpp controller_manager_msgs geometry_msgs rclcpp rosgraph_msgs rviz_common std_msgs)
+ament_target_dependencies(mur_rviz_docking_prototype ament_index_cpp controller_manager_msgs geometry_msgs rcl_interfaces rclcpp rosgraph_msgs rviz_common std_msgs)
 install(TARGETS mur_rviz_docking_prototype DESTINATION lib/${PROJECT_NAME})
 
 install(PROGRAMS
@@ -61,6 +64,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_session_shell test/test_session_shell.py)
   ament_add_pytest_test(test_remote_discovery_config test/test_remote_discovery_config.py)
   ament_add_pytest_test(test_process_manager test/test_process_manager.py)
+  ament_add_pytest_test(test_log_panel test/test_log_panel.py)
   ament_add_pytest_test(test_deb_package test/test_deb_package.py)
 endif()
 

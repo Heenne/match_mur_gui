@@ -1,13 +1,30 @@
 #include "ros_session_monitor.hpp"
+#include "log_store.hpp"
 
 #include <algorithm>
 #include <chrono>
 
 #include <QString>
 
-RosSessionMonitor::RosSessionMonitor(const rclcpp::Node::SharedPtr & node)
+RosSessionMonitor::RosSessionMonitor(const rclcpp::Node::SharedPtr & node, LogStore * logs)
 : node_(node)
 {
+  rosout_subscription_ = node_->create_subscription<rcl_interfaces::msg::Log>(
+    "/rosout", rclcpp::QoS(1000), [logs](rcl_interfaces::msg::Log::ConstSharedPtr message) {
+      if (!logs) return;
+      QString level = "INFO";
+      switch (message->level) {
+        case rcl_interfaces::msg::Log::DEBUG: level = "DEBUG"; break;
+        case rcl_interfaces::msg::Log::WARN: level = "WARN"; break;
+        case rcl_interfaces::msg::Log::ERROR: level = "ERROR"; break;
+        case rcl_interfaces::msg::Log::FATAL: level = "FATAL"; break;
+        default: break;
+      }
+      logs->append("ROS /rosout", level,
+        QString("%1 (%2): %3").arg(QString::fromStdString(message->name),
+          QString::fromStdString(message->file + ":" + std::to_string(message->line)),
+          QString::fromStdString(message->msg)));
+    });
   clock_subscription_ = node_->create_subscription<rosgraph_msgs::msg::Clock>(
     "/clock", rclcpp::QoS(10), [this](rosgraph_msgs::msg::Clock::ConstSharedPtr message) {
       const int64_t now = static_cast<int64_t>(message->clock.sec) * 1000000000LL +

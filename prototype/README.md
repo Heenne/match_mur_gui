@@ -47,8 +47,8 @@ Robot, Processes, Diagnosis, Logs, and Settings.
 The Processes view starts the local MuR620 simulation and manages the Gazebo
 world view as a separate `gz sim -g` client. Starting or stopping the client
 does not stop the simulation server, `/clock`, ROS bridge, or their logs. The
-client can be opened later when the app-owned simulation launch is running or
-when `/clock` is discovered in the selected ROS domain. Client launch output and
-failure state appear in Processes. The app does not discover Gazebo servers
-through Gazebo Transport; a server outside the app must be visible through the
-selected ROS graph's `/clock` publisher before the client can be opened.
+client can be opened later when `/clock` is discovered in the selected ROS
+domain. When auto-open is enabled, starting simulation also requests a ROS
+connection and waits for `/clock`; the client is not started if the server is
+not confirmed within 60 seconds. Client launch output and failure state appear
+in Processes. The app does not discover Gazebo servers through Gazebo Transport.

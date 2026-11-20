@@ -17,6 +17,7 @@
   <depend>rviz_common</depend>
   <depend>geometry_msgs</depend>
   <depend>rosgraph_msgs</depend>
+  <depend>rcl_interfaces</depend>
   <depend>ament_index_cpp</depend>
 
   <exec_depend>action_msgs</exec_depend>
@@ -35,7 +36,6 @@
   <exec_depend>qml-module-qtquick-layouts</exec_depend>
   <exec_depend>qmlscene</exec_depend>
   <exec_depend>rclpy</exec_depend>
-  <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <depend>std_msgs</depend>
   <exec_depend>std_srvs</exec_depend>

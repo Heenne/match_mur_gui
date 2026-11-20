@@ -10,6 +10,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout MiR service definitions
+        uses: actions/checkout@v4
+        with:
+          repository: match-ROS/match_mobile_robotics_jazzy
+          ref: main
+          path: src/match_mobile_robotics_jazzy
       - uses: ros-tooling/setup-ros@v0.7
         with:
           required-ros-distributions: jazzy
@@ -18,10 +24,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3-colcon-common-extensions python3-rosdep dpkg-dev
           rosdep update
-          rosdep install --from-paths . --ignore-src --rosdistro jazzy -r -y \
-            --skip-keys "ewellix_interfaces mir_srvs mur_control"
+          rosdep install --from-paths . src/match_mobile_robotics_jazzy/mir_robot/mir_srvs \
+            --ignore-src --rosdistro jazzy -r -y --skip-keys "ewellix_interfaces mur_control"
       - name: Build package
-        run: colcon build --merge-install --install-base build/install --packages-select match_mur_gui
+        run: >-
+          colcon build --merge-install --install-base build/install
+          --base-paths . src/match_mobile_robotics_jazzy/mir_robot/mir_srvs
+          --packages-up-to match_mur_gui
       - name: Assemble Debian package
         shell: bash
         run: |

@@ -43,6 +43,7 @@
 #include "rviz_common/yaml_config_reader.hpp"
 #include "ros_session_monitor.hpp"
 #include "simulation_base_jog.hpp"
+#include "mir_hardware_control.hpp"
 #include "process_manager.hpp"
 #include "log_store.hpp"
 #include "log_panel.hpp"
@@ -1093,6 +1094,8 @@ public:
   : QMainWindow(), context_(context), config_override_(config_path), session_(new SessionController()),
     sim_base_jog_adapter_(std::make_shared<RosSimBaseJogAdapter>()),
     sim_base_jog_(new SimulationBaseJog(sim_base_jog_adapter_, this)),
+    mir_hardware_adapter_(std::make_shared<RosMirHardwareAdapter>()),
+    mir_hardware_control_(new MirHardwareControl(mir_hardware_adapter_, this)),
     goals_poses_adapter_(std::make_shared<RosGoalsPosesAdapter>()),
     goals_poses_(new GoalsPoses(goals_poses_adapter_,
       QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/poses.json", this)),
@@ -1107,6 +1110,8 @@ public:
     command_center->rootContext()->setContextProperty("session", session_);
     command_center->rootContext()->setContextProperty("simBaseJog", sim_base_jog_);
     command_center->rootContext()->setContextProperty("goalsPoses", goals_poses_);
+    command_center->rootContext()->setContextProperty("mirHardwareControl", mir_hardware_control_);
+    mir_hardware_control_->setContext(session_->robot(), session_->mode(), session_->target(), false);
     command_center->rootContext()->setContextProperty("mocap", mocap_);
     process_manager_ = new ProcessManager(this);
     mocap_->setProcessManager(process_manager_);
@@ -1137,6 +1142,8 @@ public:
       mocap_->setRobot(session_->robot());
       goals_poses_->setConnected(session_->connectionState() == "Connected" &&
         (session_->mode() == "Hardware" || session_->mode() == "Simulation"));
+      mir_hardware_control_->setContext(session_->robot(), session_->mode(), session_->target(),
+        session_->connectionState() == "Connected");
       setWindowTitle(QString("MuR Command Center · %1 · %2 · %3")
         .arg(session_->mode(), session_->preset(), session_->robot()));
       if (rviz_dock_) rviz_dock_->setWindowTitle("Visualisierung · " + session_label());
@@ -1282,6 +1289,7 @@ public:
       rviz_node_->get_raw_node()->set_parameter(
         rclcpp::Parameter("use_sim_time", session_->useSimTime()));
       sim_base_jog_adapter_->setNode(rviz_node_->get_raw_node());
+      mir_hardware_adapter_->setNode(rviz_node_->get_raw_node());
       goals_poses_adapter_->setNode(rviz_node_->get_raw_node());
       mocap_->setNode(rviz_node_->get_raw_node());
       goals_poses_->setConnected(session_->mode() == "Hardware" || session_->mode() == "Simulation");
@@ -1325,6 +1333,7 @@ public:
       ros_executor_.reset();
       rviz_node_.reset();
       sim_base_jog_adapter_->setNode({});
+      mir_hardware_adapter_->setNode({});
       goals_poses_adapter_->setNode({});
       mocap_->setNode({});
       goals_poses_->setConnected(false);
@@ -1342,6 +1351,7 @@ public:
   void disconnect_ros()
   {
     sim_base_jog_->stop("ROS disconnected");
+    mir_hardware_control_->stop("ROS disconnected");
     ros_spin_timer_.stop();
     diagnosis_timer_.stop();
     if (rviz_dock_) {
@@ -1357,6 +1367,7 @@ public:
     ros_executor_.reset();
     rviz_node_.reset();
     sim_base_jog_adapter_->setNode({});
+    mir_hardware_adapter_->setNode({});
     goals_poses_adapter_->setNode({});
     goals_poses_->setConnected(false);
     pending_context_.clear();
@@ -1371,6 +1382,7 @@ protected:
   void closeEvent(QCloseEvent * event) override
   {
     sim_base_jog_->stop("window closed");
+    mir_hardware_control_->stop("window closed");
     if (rviz_node_) disconnect_ros();
     event->accept();
   }
@@ -1383,6 +1395,8 @@ private:
   SessionController * session_;
   std::shared_ptr<RosSimBaseJogAdapter> sim_base_jog_adapter_;
   SimulationBaseJog * sim_base_jog_;
+  std::shared_ptr<RosMirHardwareAdapter> mir_hardware_adapter_;
+  MirHardwareControl * mir_hardware_control_;
   std::shared_ptr<RosGoalsPosesAdapter> goals_poses_adapter_;
   GoalsPoses * goals_poses_;
   MocapController * mocap_;
@@ -1428,6 +1442,8 @@ int main(int argc, char ** argv)
       // Checks active-profile RViz selection, time source, and unavailable profile errors.
     } else if (arguments[i] == "--contract-test-sim-base-jog") {
       // Exercises hold-to-run behavior against an isolated fake ROS adapter.
+    } else if (arguments[i] == "--contract-test-mir-hardware-control") {
+      // Exercises hardware jog and MiR light actions through a fake ROS adapter.
     } else if (arguments[i] == "--contract-test-goals-poses") {
       // Exercises pose CRUD, stale-pose rejection, and selected-robot routing through a fake adapter.
     } else if (arguments[i] == "--contract-test-mocap") {
@@ -1526,6 +1542,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Simulation base jog contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-mir-hardware-control")) {
+    if (!run_mir_hardware_control_contract_test()) {
+      qCritical("MiR hardware control contract failed");
+      return 1;
+    }
+    qInfo("MiR hardware control contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-goals-poses")) {

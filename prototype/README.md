@@ -44,9 +44,15 @@ same active profile. The optional `--context` label is retained for the host's
 initial title. The GUI supports keys 1–7 to select Overview, Visualization,
 Robot, Processes, Diagnosis, Logs, and Settings.
 
-The host remains a prototype; ROS graph connection feedback is limited to the
-RViz node starting. No simulation or hardware launch process is wired to the
-shell.
+The Diagnosis view reports ROS graph endpoints and controller-manager state.
+In Hardware mode it also reads the selected robot's base/arm controller
+managers, lift joints, and separate MuR and MiR batteries. Battery percentages
+and lift positions include their data age; values older than three seconds are
+marked stale. MiR's reported remaining runtime is labeled as an estimate and
+has its own age. No dashboard safety state is inferred from ROS graph presence.
+Controller, battery, and lift reads are subscriptions or read-only
+`list_controllers` requests; this status path does not start hardware or issue
+motion commands.
 
 The Robot view includes profile-routed goals and saved poses. Simulation uses
 Nav2 `NavigateToPose` at `/<robot>/navigate_to_pose` and reads fresh

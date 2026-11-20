@@ -45,5 +45,22 @@ initial title. The GUI supports keys 1–7 to select Overview, Visualization,
 Robot, Processes, Diagnosis, Logs, and Settings.
 
 The host remains a prototype; ROS graph connection feedback is limited to the
-RViz node starting. No simulation or hardware launch process is wired to the
-shell.
+RViz node starting. Hardware launch processes are not wired to the shell.
+
+## Remote simulation process prototype
+
+From the Processes view, select a Simulation preset whose target is a remote
+host and choose **Start remote simulation**. The target must be a host alias or
+hostname accepted by SSH, the remote account must have non-interactive SSH key
+access, and `bash -lc` on that host must find the sourced ROS 2 Jazzy workspace
+and `mur_launch_sim` package. The selected ROS domain and robot name are passed
+to the remote launch. The app records remote stdout/stderr under a host- and
+run-specific log source.
+
+Each launch receives a random run ID and starts in a dedicated `setsid`
+process group. Stop connects over SSH again and checks the recorded PID's
+environment for that exact run ID and its process-group ID before sending
+SIGINT to the group. A foreign process is never selected by name or stopped.
+If SSH or the ownership check fails, the process row reports **Stop failed**
+and the log says the remote run may still be active. This prototype does not
+store SSH credentials; configure SSH keys or an agent on the operator account.

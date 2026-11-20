@@ -747,6 +747,42 @@ bool run_process_manager_contract_test()
   return false;
 }
 
+bool run_remote_process_manager_contract_test()
+{
+  const auto fake_ssh = qEnvironmentVariable("MUR_FAKE_SSH");
+  if (fake_ssh.isEmpty() || !QFileInfo::exists(fake_ssh)) return false;
+  ProcessManager manager(nullptr, fake_ssh);
+  if (manager.startRemoteSimulation("bad host", 87, "mur620a") ||
+    manager.startRemoteSimulation("sim-host", 233, "mur620a") ||
+    manager.startRemoteSimulation("sim-host", 87, "bad;robot")) return false;
+  if (!manager.startRemoteSimulation("sim-host", 87, "mur620a")) return false;
+
+  QElapsedTimer timer;
+  timer.start();
+  while (timer.elapsed() < 5000 && !manager.log().contains("remote launch ready")) {
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+  }
+  auto rows = manager.processes();
+  if (rows.size() != 1 || rows.first().toMap().value("host").toString() != "sim-host" ||
+    rows.first().toMap().value("state").toString() != "Running" ||
+    !manager.log().contains("remote launch ready")) {
+    qCritical("remote launch did not become visible: %s", qPrintable(manager.log()));
+    return false;
+  }
+  manager.stopProcess("Remote MUR620 simulation");
+  timer.restart();
+  while (timer.elapsed() < 5000) {
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    rows = manager.processes();
+    if (rows.first().toMap().value("state").toString() == "Stopped") {
+      return manager.log().contains("Stop signal sent to app-owned remote run") &&
+             manager.log().contains("remote launch stopped");
+    }
+  }
+  qCritical("remote run failed to stop safely: %s", qPrintable(manager.log()));
+  return false;
+}
+
 class PrototypeWindow : public QMainWindow
 {
 public:
@@ -1064,6 +1100,8 @@ int main(int argc, char ** argv)
       // Exercises DDS environment setup without initializing ROS.
     } else if (arguments[i] == "--contract-test-process-manager") {
       // Exercises process ownership and captured output through a fake executable.
+    } else if (arguments[i] == "--contract-test-remote-process-manager") {
+      // Exercises SSH ownership handshakes and exact-run stop through a fake ssh executable.
     } else if (arguments[i] == "--contract-test-log-store") {
       // Exercises filtering, exports, redaction, and process-to-log source selection.
     } else if (arguments[i] == "--context" && i + 1 < arguments.size()) {
@@ -1152,6 +1190,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Process manager contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-remote-process-manager")) {
+    if (!run_remote_process_manager_contract_test()) {
+      qCritical("Remote process manager contract failed");
+      return 1;
+    }
+    qInfo("Remote process manager contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-log-store")) {

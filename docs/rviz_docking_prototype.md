@@ -15,11 +15,15 @@ source install/setup.bash
 ros2 run match_mur_gui mur_rviz_docking_prototype
 ```
 
-Pass an existing RViz config with `--config /path/to/view.rviz`. The optional
-`--context "Hardware · Versuchsfeld · mur620a"` label is shown in the window
-title, both dock titles, and status bar. This is a display label only; it does
-not change ROS domains, hosts, profiles, or an existing ROS connection. The
-process inherits the shell's ROS environment, including `ROS_DOMAIN_ID`.
+RViz loads the active preset's machine-local config path. Pass
+`--config /path/to/view.rviz` to override it for this launch. A profile without
+a readable, nonempty RViz configuration is reported as unavailable before ROS
+initialization. The host sets `use_sim_time` from the selected Simulation or
+Hardware mode before it starts RViz. Dock titles and diagnostics show the
+active preset, target, robot, domain, configuration, and time source. Changing
+session context disconnects RViz and requires a fresh Connect action. The
+process inherits the shell's ROS environment, including `ROS_DOMAIN_ID`;
+`--context` only supplies the host's initial display label.
 
 ## Automated non-display checks
 

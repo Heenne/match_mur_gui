@@ -142,6 +142,22 @@ python3 scripts/install_gui_desktop.py --app all
 
 Danach in der Ubuntu-Anwendungssuche nach „MuR Basis-GUI“, „MuR Mocap“, „MuR Cooperative Handling“, „MuR OAK Kamera“ oder „MuR Navigation“ suchen oder die gleichnamigen Desktop-Icons doppelklicken. Der Installer prüft die vorhandenen ROS-Executables, bevor er Dateien anlegt. Jede Verknüpfung lädt beim Start `/opt/ros/jazzy/setup.bash` und das Workspace-Setup; ein Terminal ist nicht nötig. Ohne vorgegebene `ROS_DOMAIN_ID` verwendet sie Domain 62. Sie startet nur die gewählte GUI und keine Roboterhardware.
 
+### Ubuntu 24.04 `.deb` ohne Workspace
+
+Pushes auf `main` erzeugen einen Ubuntu 24.04 / ROS 2 Jazzy `.deb` als
+GitHub Actions-Artefakt. Das Artefakt **match-mur-gui-ubuntu-24.04-ros-jazzy**
+herunterladen und installieren:
+
+```bash
+sudo apt install ./match-mur-gui_*.deb
+```
+
+APT installiert die im Paket deklarierten ROS-, Qt- und QML-Laufzeitabhängigkeiten.
+Auf dem Rechner müssen die passenden ROS-2-Jazzy-Paketquellen eingerichtet
+sein. Danach erscheint **MuR Basis-GUI** in der Ubuntu-Anwendungssuche. Der
+Starteintrag lädt `/opt/ros/$ROS_DISTRO/setup.bash` (standardmäßig Jazzy) und
+startet die installierte GUI, ohne einen Quell-Workspace vorauszusetzen.
+
 Alle GUIs mit der gemeinsamen MuR-Basis konfigurieren vor dem ROS-Start automatisch
 direkte DDS-Peers für die per SSH erreichbaren Hostnamen `mur620a` bis `mur620d`. Dadurch
 funktioniert die Verbindung auch ohne zuverlässige Multicast-Erkennung. Die

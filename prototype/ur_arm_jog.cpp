@@ -454,13 +454,19 @@ public:
           for (auto & entry : arms) {
             const auto key = entry.first;
             if (key.rfind("/" + robot + "/UR10_", 0) != 0) continue;
-            const auto side_joint_prefix = key.substr(key.rfind("/UR10_") + 1) + "_";
+            const auto arm_prefix = key.substr(key.rfind("/UR10_") + 1) + "/";
             size_t count = 0;
-            for (size_t index = 0; index < message->name.size(); ++index) {
-              const auto & name = message->name[index];
-              if (name.rfind(side_joint_prefix, 0) == 0 && name.size() > side_joint_prefix.size() &&
-                index < message->position.size() && std::isfinite(message->position[index])) {
-                ++count;
+            const std::vector<std::string> arm_joint_suffixes = {
+              "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+              "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"};
+            for (const auto & suffix : arm_joint_suffixes) {
+              const auto expected = arm_prefix + suffix;
+              for (size_t index = 0; index < message->name.size(); ++index) {
+                if (message->name[index] == expected && index < message->position.size() &&
+                  std::isfinite(message->position[index])) {
+                  ++count;
+                  break;
+                }
               }
             }
             auto & watched = entry.second;
@@ -668,7 +674,7 @@ void RosUrArmJogAdapter::publish(const std::string & robot, const std::string & 
   }
   geometry_msgs::msg::TwistStamped message;
   message.header.stamp = node_->now();
-  message.header.frame_id = "base";
+  message.header.frame_id = "UR10_" + side + "/base_link";
   message.twist.linear.x = twist[0];
   message.twist.linear.y = twist[1];
   message.twist.linear.z = twist[2];

@@ -95,11 +95,15 @@ Item {
             Panel { heading: "Visualization" }
             Rectangle {
                 color: "transparent"
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 12
-                    Panels.SimBaseJog { Layout.fillWidth: true; Layout.fillHeight: true; visible: session.mode === "Simulation" }
-                    Panel { Layout.fillWidth: true; Layout.fillHeight: true; heading: "Robot actions are unavailable in this prototype"; visible: session.mode !== "Simulation" }
+                ScrollView {
+                    anchors.fill: parent; clip: true
+                    ColumnLayout {
+                        width: parent.width
+                        spacing: 12
+                        Panels.SimBaseJog { Layout.fillWidth: true; Layout.preferredHeight: 260; visible: session.mode === "Simulation" }
+                        Panel { Layout.fillWidth: true; Layout.preferredHeight: 100; heading: "Other robot actions are not available in this prototype"; visible: session.mode !== "Simulation" }
+                        Panels.GoalsPoses { Layout.fillWidth: true; Layout.preferredHeight: 440; goals: goalsPoses; sessionController: session }
+                    }
                 }
             }
             Panels.ProcessesPanel { processManager: processes }

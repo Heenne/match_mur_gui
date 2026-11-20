@@ -14,6 +14,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
 find_package(controller_manager_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(actionlib_msgs REQUIRED)
 find_package(action_msgs REQUIRED)
@@ -24,6 +25,8 @@ find_package(ament_index_cpp REQUIRED)
 add_executable(mur_rviz_docking_prototype
   prototype/rviz_docking_main.cpp
   prototype/ros_session_monitor.cpp
+  prototype/hardware_status.cpp
+  prototype/hardware_status.hpp
   prototype/process_manager.cpp
   prototype/log_store.cpp
   prototype/log_panel.cpp
@@ -34,7 +37,7 @@ add_executable(mur_rviz_docking_prototype
 )
 target_compile_features(mur_rviz_docking_prototype PRIVATE cxx_std_17)
 target_link_libraries(mur_rviz_docking_prototype Qt5::Widgets Qt5::QuickWidgets Qt5::Network)
-ament_target_dependencies(mur_rviz_docking_prototype action_msgs actionlib_msgs ament_index_cpp controller_manager_msgs geometry_msgs nav2_msgs rcl_interfaces rclcpp rosgraph_msgs rviz_common std_msgs)
+ament_target_dependencies(mur_rviz_docking_prototype action_msgs actionlib_msgs ament_index_cpp controller_manager_msgs geometry_msgs nav2_msgs rcl_interfaces rclcpp rosgraph_msgs rviz_common sensor_msgs std_msgs)
 install(TARGETS mur_rviz_docking_prototype DESTINATION lib/${PROJECT_NAME})
 
 install(PROGRAMS
@@ -53,6 +56,8 @@ if(BUILD_TESTING)
   set_tests_properties(sim_base_jog_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME goals_poses_behavior COMMAND mur_rviz_docking_prototype --contract-test-goals-poses)
   set_tests_properties(goals_poses_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_test(NAME hardware_status_behavior COMMAND mur_rviz_docking_prototype --contract-test-hardware-status)
+  set_tests_properties(hardware_status_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_cartesian_startup test/test_cartesian_startup.py)
   ament_add_pytest_test(test_cartesian_jog test/test_cartesian_jog.py)

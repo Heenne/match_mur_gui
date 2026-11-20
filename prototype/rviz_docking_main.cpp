@@ -46,7 +46,11 @@
 #include "log_store.hpp"
 #include "log_panel.hpp"
 #include "goals_poses.hpp"
+#include "hardware_status.hpp"
 #include "std_msgs/msg/string.hpp"
+#include "std_msgs/msg/float32.hpp"
+#include "sensor_msgs/msg/battery_state.hpp"
+#include "sensor_msgs/msg/joint_state.hpp"
 
 namespace
 {
@@ -486,6 +490,12 @@ bool run_ros_session_monitor_contract_test()
   auto clock_publisher = fixture->create_publisher<rosgraph_msgs::msg::Clock>("/clock", 10);
   auto wrong_type = fixture->create_publisher<std_msgs::msg::String>(
     "/mur620d/mobile_base_controller/cmd_vel", 10);
+  auto mur_soc = fixture->create_publisher<std_msgs::msg::Float32>(
+    "/mur620d/bms_status/SOC", 10);
+  auto mir_battery = fixture->create_publisher<sensor_msgs::msg::BatteryState>(
+    "/mur620d/battery_state", 10);
+  auto joints = fixture->create_publisher<sensor_msgs::msg::JointState>(
+    "/mur620d/joint_states", 10);
   using ListControllers = controller_manager_msgs::srv::ListControllers;
   auto manager = fixture->create_service<ListControllers>(
     "/mur620d/controller_manager/list_controllers",
@@ -505,12 +515,26 @@ bool run_ros_session_monitor_contract_test()
     rosgraph_msgs::msg::Clock clock_message;
     clock_message.clock.sec = attempt;
     clock_publisher->publish(clock_message);
+    std_msgs::msg::Float32 soc_message;
+    soc_message.data = 81.2F;
+    mur_soc->publish(soc_message);
+    sensor_msgs::msg::BatteryState battery_message;
+    battery_message.percentage = 0.65F;
+    battery_message.voltage = 25.4F;
+    mir_battery->publish(battery_message);
+    sensor_msgs::msg::JointState joint_message;
+    joint_message.name = {"left_lift_joint", "right_lift_joint"};
+    joint_message.position = {0.42, 0.51};
+    joints->publish(joint_message);
     executor.spin_some();
     const auto hardware = monitor.diagnose("localhost", "mur620d", "Hardware", 0);
     if (hardware.join("\n").contains("drive_controller: active")) {
       const auto simulation = monitor.diagnose("localhost", "mur620d", "Simulation", 0).join("\n");
       passed = hardware.join("\n").contains("remote node(s) discovered") &&
         hardware.join("\n").contains("wrong type on /mur620d/mobile_base_controller/cmd_vel") &&
+        hardware.join("\n").contains("MuR battery: 81.2%") &&
+        hardware.join("\n").contains("MiR battery: 65.0%") &&
+        hardware.join("\n").contains("left_lift_joint: 0.420 m") &&
         hardware.join("\n").contains("Clock: not required in Hardware mode") &&
         simulation.contains("Clock: advancing") && monitor.simulationServerAvailable();
       break;
@@ -521,6 +545,39 @@ bool run_ros_session_monitor_contract_test()
   executor.remove_node(fixture);
   rclcpp::shutdown();
   return passed;
+}
+
+bool run_hardware_status_contract_test()
+{
+  auto now = std::chrono::steady_clock::time_point{} + std::chrono::seconds(100);
+  HardwareStatus status([&now]() { return now; });
+  status.expectBattery("MuR", "/mur620d/bms_status/battery_state");
+  status.expectBattery("MiR", "/mur620d/battery_state");
+  auto lines = status.diagnostics("mur620d").join("\n");
+  if (!lines.contains("MuR battery: not received") || !lines.contains("MiR battery: not received") ||
+    !lines.contains("Hardware component lift: not received")) return false;
+
+  status.updateBattery("MuR", "/mur620d/bms_status/battery_state", 81.2, 25.4, -1.3, 42.0, 50.0);
+  status.updateBattery("MiR", "/mur620d/battery_state", 65.0, 24.8, -0.8, 31.0, 36.0);
+  status.updateRemainingEstimate("/mur620d/battery_time_remaining", 7200);
+  status.updateLift({"left_lift_joint", "right_lift_joint"}, {0.42, 0.51});
+  lines = status.diagnostics("mur620d").join("\n");
+  if (!lines.contains("MuR battery: 81.2% · current") || !lines.contains("25.4 V") ||
+    !lines.contains("MiR battery: 65.0% · current") || !lines.contains("24.8 V") ||
+    !lines.contains("runtime 2.0 h · reported estimate") ||
+    !lines.contains("left_lift_joint: 0.420 m") || !lines.contains("right_lift_joint: 0.510 m")) {
+    qWarning("Current hardware status was: %s", qPrintable(lines));
+    return false;
+  }
+
+  now += std::chrono::seconds(4);
+  lines = status.diagnostics("mur620d").join("\n");
+  const bool stale = lines.contains("MuR battery: 81.2% · stale") &&
+    lines.contains("MiR battery: 65.0% · stale") &&
+    lines.contains("runtime 2.0 h · stale estimate") &&
+    lines.contains("Hardware component lift: stale");
+  if (!stale) qWarning("Stale hardware status was: %s", qPrintable(lines));
+  return stale;
 }
 
 bool run_portable_preset_contract_test()
@@ -1199,6 +1256,8 @@ int main(int argc, char ** argv)
       // Exercised below before the GUI/ROS host is created.
     } else if (arguments[i] == "--contract-test-ros-session-monitor") {
       // Exercises the public monitor output against a live in-process ROS graph.
+    } else if (arguments[i] == "--contract-test-hardware-status") {
+      // Exercises missing, current, and stale telemetry through an injected clock and message seam.
     } else if (arguments[i] == "--contract-test-portable-presets") {
       // Exercises portable preset serialization through the session interface.
     } else if (arguments[i] == "--contract-test-gazebo-preset") {
@@ -1263,6 +1322,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("ROS session monitor contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-hardware-status")) {
+    if (!run_hardware_status_contract_test()) {
+      qCritical("Hardware status contract failed");
+      return 1;
+    }
+    qInfo("Hardware status contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-portable-presets")) {

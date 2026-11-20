@@ -28,6 +28,7 @@
 #include <QRegularExpression>
 #include <QStatusBar>
 #include <QTimer>
+#include <QCloseEvent>
 #include <QElapsedTimer>
 #include <QCoreApplication>
 #include <cstdlib>
@@ -40,6 +41,7 @@
 #include "rviz_common/visualization_frame.hpp"
 #include "rviz_common/yaml_config_reader.hpp"
 #include "ros_session_monitor.hpp"
+#include "simulation_base_jog.hpp"
 #include "process_manager.hpp"
 #include "std_msgs/msg/string.hpp"
 
@@ -747,7 +749,9 @@ class PrototypeWindow : public QMainWindow
 {
 public:
   PrototypeWindow(const QString & config_path, const QString & context, const QString & qml_path)
-  : QMainWindow(), context_(context), config_override_(config_path), session_(new SessionController())
+  : QMainWindow(), context_(context), config_override_(config_path), session_(new SessionController()),
+    sim_base_jog_adapter_(std::make_shared<RosSimBaseJogAdapter>()),
+    sim_base_jog_(new SimulationBaseJog(sim_base_jog_adapter_, this))
   {
     setWindowTitle(QString("MuR Command Center · %1").arg(context_));
     resize(1440, 900);
@@ -756,6 +760,7 @@ public:
     auto * command_center = new QQuickWidget(this);
     command_center->setResizeMode(QQuickWidget::SizeRootObjectToView);
     command_center->rootContext()->setContextProperty("session", session_);
+    command_center->rootContext()->setContextProperty("simBaseJog", sim_base_jog_);
     process_manager_ = new ProcessManager(this);
     command_center->rootContext()->setContextProperty("processes", process_manager_);
     command_center->setSource(QUrl::fromLocalFile(qml_path));
@@ -918,6 +923,7 @@ public:
         "mur_rviz_docking_prototype");
       rviz_node_->get_raw_node()->set_parameter(
         rclcpp::Parameter("use_sim_time", session_->useSimTime()));
+      sim_base_jog_adapter_->setNode(rviz_node_->get_raw_node());
       ros_executor_->add_node(rviz_node_->get_raw_node());
       session_monitor_ = std::make_unique<RosSessionMonitor>(rviz_node_->get_raw_node());
       auto * frame = new rviz_common::VisualizationFrame(rviz_node_);
@@ -954,6 +960,7 @@ public:
       if (ros_executor_ && rviz_node_) ros_executor_->remove_node(rviz_node_->get_raw_node());
       ros_executor_.reset();
       rviz_node_.reset();
+      sim_base_jog_adapter_->setNode({});
       pending_context_.clear();
       connected_context_.clear();
       if (rclcpp::ok()) rclcpp::shutdown();
@@ -967,6 +974,7 @@ public:
 
   void disconnect_ros()
   {
+    sim_base_jog_->stop("ROS disconnected");
     ros_spin_timer_.stop();
     diagnosis_timer_.stop();
     if (rviz_dock_) {
@@ -978,11 +986,21 @@ public:
     if (ros_executor_ && rviz_node_) ros_executor_->remove_node(rviz_node_->get_raw_node());
     ros_executor_.reset();
     rviz_node_.reset();
+    sim_base_jog_adapter_->setNode({});
+    pending_context_.clear();
     connected_context_.clear();
     if (rclcpp::ok()) rclcpp::shutdown();
     session_->setDiscoveryRoute(QString());
     session_->setDiagnostics({"Disconnected · external ROS launches and processes were left running"});
     session_->setConnectionState("Disconnected");
+  }
+
+protected:
+  void closeEvent(QCloseEvent * event) override
+  {
+    sim_base_jog_->stop("window closed");
+    if (rviz_node_) disconnect_ros();
+    event->accept();
   }
 
 private:
@@ -991,6 +1009,8 @@ private:
   QString pending_context_;
   QString connected_context_;
   SessionController * session_;
+  std::shared_ptr<RosSimBaseJogAdapter> sim_base_jog_adapter_;
+  SimulationBaseJog * sim_base_jog_;
   ProcessManager * process_manager_{nullptr};
   std::shared_ptr<rviz_common::ros_integration::RosNodeAbstraction> rviz_node_;
   std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> ros_executor_;
@@ -1025,6 +1045,8 @@ int main(int argc, char ** argv)
       // Exercises portable preset serialization through the session interface.
     } else if (arguments[i] == "--contract-test-rviz-session") {
       // Checks active-profile RViz selection, time source, and unavailable profile errors.
+    } else if (arguments[i] == "--contract-test-sim-base-jog") {
+      // Exercises hold-to-run behavior against an isolated fake ROS adapter.
     } else if (arguments[i] == "--contract-test-remote-discovery") {
       // Exercises DDS environment setup without initializing ROS.
     } else if (arguments[i] == "--contract-test-process-manager") {
@@ -1091,6 +1113,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("RViz session contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-sim-base-jog")) {
+    if (!run_sim_base_jog_contract_test()) {
+      qCritical("Simulation base jog contract failed");
+      return 1;
+    }
+    qInfo("Simulation base jog contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-remote-discovery")) {

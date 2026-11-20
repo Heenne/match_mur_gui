@@ -28,10 +28,17 @@ be available on the client and remote host.
 Build from a sourced ROS 2 Jazzy workspace:
 
 ```bash
-colcon build --packages-select match_mur_gui --cmake-args -DBUILD_TESTING=ON
+colcon build --packages-up-to match_mur_gui --cmake-args -DBUILD_TESTING=ON
 source install/setup.bash
 ros2 run match_mur_gui mur_rviz_docking_prototype
 ```
+
+The workspace must also contain the `mir_srvs` interface package from
+`match-ROS/match_mobile_robotics_jazzy` at
+`mir_robot/mir_srvs`. The Debian build checks out this repository and builds
+that package as part of the dependency closure. The `.deb` bundles the
+generated `mir_srvs` runtime libraries and ament resources; the MiR light
+endpoints remain optional and are checked only when used.
 
 RViz loads the active preset's machine-local config path. Pass
 `--config /path/to/view.rviz` to override it for this launch. Connecting checks
@@ -89,3 +96,25 @@ SIGINT to the group. A foreign process is never selected by name or stopped.
 If SSH or the ownership check fails, the process row reports **Stop failed**
 and the log says the remote run may still be active. This prototype does not
 store SSH credentials; configure SSH keys or an agent on the operator account.
+
+## MiR hardware controls
+
+The Robot view exposes MiR base jog and lights only in a connected Hardware
+session. Jog is disarmed on startup and after any profile, target, mode, robot,
+or connection change. The operator must arm it explicitly. Direction controls
+are hold-to-run, stop when released or when application/window focus is lost,
+and are capped at 0.15 m/s and 0.4 rad/s. The adapter prefers a discovered
+`/<robot>/cmd_vel` `geometry_msgs/msg/Twist` subscriber, then checks
+`/<robot>/cmd_vel_stamped` `geometry_msgs/msg/TwistStamped`; no verified
+subscriber means no motion command. Commands repeat at 10 Hz with a 250 ms DDS
+lifespan. The hardware controller does not infer that a robot is safe to move
+from graph discovery.
+
+Light effects call only the selected robot's
+`/<robot>/RGB_control/{rainbow_start,rainbow_stop,match_color}` services when
+they are discovered as `std_srvs/srv/Trigger`. Solid colors use
+`/<robot>/RGB_control/solid_color` with `mir_srvs/srv/ColorRGB`; response or
+service errors are shown in the panel. Missing or incompatible services are
+reported without trying another namespace. RGB values are clamped to 0–255.
+All jog and lighting behavior tests use a fake adapter; no physical MiR was
+connected during development.

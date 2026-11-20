@@ -2,146 +2,107 @@ import QtQuick 2.12
 import QtQuick.Controls 2.5
 import QtQuick.Layouts 1.12
 
-ApplicationWindow {
+Item {
     id: window
-    visible: true
     width: 1440
     height: 900
-    minimumWidth: 840
-    minimumHeight: 560
-    title: "MuR Command Center · Layout prototype"
-    color: "#101820"
-
-    property int variant: 1
-    property int selectedLog: 0
-    property string mode: "Simulation"
-    property string preset: "Local simulation"
-    property string robot: "mur620d"
-    property var variants: ["Trial field", "Development", "Split work"]
-    property color surface: "#1b2933"
+    implicitWidth: 1440
+    implicitHeight: 900
+    property var pages: ["Overview", "Visualization", "Robot", "Processes", "Diagnosis", "Logs", "Settings"]
     property color muted: "#a8bac5"
-    property color accent: "#45d6a8"
+    property color foreground: "#f2f6f8"
 
-    function pillColor(label) {
-        if (label === "Warning") return "#f0b44d"
-        if (label === "Connected" || label === "Running" || label === "Base online" || label === "Left arm ready") return accent
-        return "#5c7180"
+    function statusColor(status) {
+        if (status === "Disconnected") return "#f0b44d"
+        if (status.indexOf("Failed") === 0 || status === "Error") return "#f07178"
+        if (status === "Connecting") return "#f0b44d"
+        return "#45d6a8"
     }
+    function selectPage(page) { session.selectView(page) }
 
-    component Pill: Rectangle {
+    Keys.onPressed: {
+        if (event.key >= Qt.Key_1 && event.key <= Qt.Key_7) {
+            selectPage(pages[event.key - Qt.Key_1]); event.accepted = true
+        }
+    }
+    Component.onCompleted: forceActiveFocus()
+
+    Rectangle { anchors.fill: parent; color: "#101820" }
+
+    component StatusPill: Rectangle {
         required property string label
-        property color fill: window.pillColor(label)
         radius: 12
-        color: fill
-        implicitWidth: pillText.implicitWidth + 20
+        color: window.statusColor(label)
+        implicitWidth: statusText.implicitWidth + 20
         implicitHeight: 28
-        Label { id: pillText; anchors.centerIn: parent; text: parent.label; color: "#102029"; font.pixelSize: 12; font.bold: true }
+        Label { id: statusText; anchors.centerIn: parent; text: parent.label; color: "#102029"; font.pixelSize: 12; font.bold: true }
     }
-
     component Panel: Rectangle {
-        default property alias contents: body.data
-        property string heading: ""
-        color: window.surface
-        radius: 12
-        border.color: "#2b3c47"
+        required property string heading
+        color: "#1b2933"; radius: 12; border.color: "#2b3c47"
         ColumnLayout {
-            id: body
-            anchors.fill: parent
-            anchors.margins: 16
-            spacing: 12
-            Label { text: parent.parent.heading; color: "#f2f6f8"; font.pixelSize: 17; font.bold: true }
+            anchors.fill: parent; anchors.margins: 18; spacing: 14
+            Label { text: parent.parent.heading; color: window.foreground; font.pixelSize: 20; font.bold: true }
+            Label { Layout.fillWidth: true; Layout.fillHeight: true; text: parent.parent.heading + " content will appear here."; color: window.muted; wrapMode: Text.WordWrap; verticalAlignment: Text.AlignTop }
         }
-    }
-
-    component SessionPanel: Panel {
-        heading: "Robot status"
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        ColumnLayout {
-            Layout.fillWidth: true
-            Label { text: window.robot + " · online"; color: "#f2f6f8"; font.pixelSize: 23; font.bold: true }
-            RowLayout { spacing: 8; Pill { label: "Base online" }; Pill { label: "Left arm ready" } }
-            Label { text: "Battery · 82%     Pose · Map frame"; color: window.muted }
-            Label { text: "Sim time · 00:18:42     Clock advancing"; color: window.muted }
-            Item { Layout.fillHeight: true }
-            Button { text: "Open robot controls"; Layout.fillWidth: true }
-        }
-    }
-
-    component VisualizationPanel: Panel {
-        heading: "Visualization"
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            radius: 8
-            color: "#d9e1e5"
-            Label { anchors.centerIn: parent; text: "RViz preview\nMap · mur620d · TF"; color: "#26343d"; horizontalAlignment: Text.AlignHCenter; font.pixelSize: 19 }
-        }
-    }
-
-    component LogsPanel: Panel {
-        heading: "Launch logs"
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        RowLayout {
-            Layout.fillWidth: true
-            Button { text: "Gazebo · gazebo.log"; checkable: true; checked: window.selectedLog === 0; onClicked: window.selectedLog = 0 }
-            Button { text: "Bringup · bringup.log"; checkable: true; checked: window.selectedLog === 1; onClicked: window.selectedLog = 1 }
-        }
-        Label { Layout.fillWidth: true; Layout.fillHeight: true; text: window.selectedLog === 0 ? "[INFO] world loaded\n[INFO] /clock advancing\n[INFO] spawn mur620d complete" : "[INFO] robot_state_publisher ready\n[WARN] Controller discovery delayed\n[INFO] arm controllers active"; color: "#b8d6c6"; font.family: "monospace"; wrapMode: Text.Wrap; verticalAlignment: Text.AlignTop; padding: 12; background: Rectangle { color: "#111d24"; radius: 8 } }
     }
 
     ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: 18
-        spacing: 14
+        anchors.fill: parent; anchors.margins: 18; spacing: 14
         RowLayout {
             Layout.fillWidth: true
             ColumnLayout {
-                spacing: 3
-                Label { text: "MuR Command Center"; color: "#f2f6f8"; font.pixelSize: 25; font.bold: true }
-                Label { text: "Prototype · shared session context across three layouts"; color: window.muted }
+                Label { text: "MuR Command Center"; color: window.foreground; font.pixelSize: 25; font.bold: true }
+                Label { text: session.mode + " · " + session.preset + " · ROS target · " + session.robot; color: window.muted }
             }
             Item { Layout.fillWidth: true }
-            ComboBox { model: ["Simulation", "Hardware"]; currentIndex: mode === "Simulation" ? 0 : 1; onActivated: window.mode = currentText }
-            ComboBox { model: ["Local simulation", "Trial field", "Development"]; currentIndex: model.indexOf(window.preset); onActivated: window.preset = currentText }
-            ComboBox { model: ["mur620d", "mur620b"]; currentIndex: model.indexOf(window.robot); onActivated: window.robot = currentText }
+            ComboBox { model: ["Simulation", "Hardware"]; currentIndex: model.indexOf(session.mode); onActivated: session.selectMode(currentText) }
+            ComboBox { model: session.presets; currentIndex: model.indexOf(session.preset); onActivated: session.selectPreset(currentText) }
+            Button { text: "New preset"; onClicked: presetDialog.open() }
+            ComboBox {
+                id: targetCombo
+                editable: true
+                model: ["localhost", "lab-host"]
+                currentIndex: model.indexOf(session.target)
+                Component.onCompleted: editText = session.target
+                onActivated: session.selectTarget(currentText)
+                onAccepted: session.selectTarget(editText)
+            }
+            Connections {
+                target: session
+                function onChanged() { targetCombo.editText = session.target }
+            }
+            ComboBox { model: ["mur620d", "mur620b", "mur620c"]; currentIndex: model.indexOf(session.robot); onActivated: session.selectRobot(currentText) }
         }
         RowLayout {
             Layout.fillWidth: true
-            Pill { label: window.mode }
-            Pill { label: "Connected" }
-            Pill { label: "Running" }
-            Label { text: window.preset + "  ·  localhost  ·  ROS 2 Domain 42"; color: window.muted }
+            StatusPill { label: session.mode }
+            StatusPill { label: session.connectionState }
+            Button { text: session.connectionState === "Connected" ? "Connected" : "Connect"; enabled: session.connectionState !== "Connected"; onClicked: session.connectToTarget() }
+            Label { text: session.connectionState === "Disconnected" ? "No ROS connection · no processes started" : "Connection state · no processes started"; color: window.muted }
             Item { Layout.fillWidth: true }
             Repeater {
-                model: window.variants
-                Button {
-                    required property string modelData
-                    text: modelData
-                    checkable: true
-                    checked: index === window.variant
-                    onClicked: window.variant = index
-                }
+                model: window.pages
+                Button { required property string modelData; text: modelData; checkable: true; checked: session.view === modelData; onClicked: selectPage(modelData) }
             }
         }
-        Rectangle {
-            Layout.fillWidth: true
-            radius: 8
-            color: "#493920"
-            border.color: "#a77d36"
-            implicitHeight: warningLabel.implicitHeight + 20
-            Label { id: warningLabel; anchors.fill: parent; anchors.margins: 10; text: "⚠ Controller discovery delayed — inspect Bringup log"; color: "#ffd782"; font.bold: true; verticalAlignment: Text.AlignVCenter }
-        }
         StackLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            currentIndex: window.variant
-            RowLayout { spacing: 12; SessionPanel { Layout.preferredWidth: 300 }; VisualizationPanel { Layout.fillWidth: true }; LogsPanel { Layout.preferredWidth: 390 } }
-            ColumnLayout { spacing: 12; RowLayout { Layout.fillWidth: true; VisualizationPanel { Layout.fillWidth: true }; SessionPanel { Layout.preferredWidth: 320 } }; LogsPanel { Layout.fillWidth: true; Layout.preferredHeight: 260 } }
-            RowLayout { spacing: 12; VisualizationPanel { Layout.fillWidth: true }; LogsPanel { Layout.fillWidth: true } }
+            Layout.fillWidth: true; Layout.fillHeight: true
+            currentIndex: Math.max(0, window.pages.indexOf(session.view))
+            Panel { heading: "Overview" }
+            Panel { heading: "Visualization" }
+            Panel { heading: "Robot" }
+            Panel { heading: "Processes" }
+            Panel { heading: "Diagnosis" }
+            Panel { heading: "Logs" }
+            Panel { heading: "Settings" }
         }
+        Label { text: "Disconnected · status is shown by text and color"; color: "#f0b44d"; Accessible.name: "Disconnected" }
+    }
+    Dialog {
+        id: presetDialog; title: "Create preset"; modal: true; standardButtons: Dialog.Ok | Dialog.Cancel
+        anchors.centerIn: parent
+        contentItem: TextField { id: presetName; placeholderText: "Preset name" }
+        onAccepted: { if (presetName.text.trim().length) session.selectPreset(presetName.text.trim()); presetName.clear() }
     }
 }

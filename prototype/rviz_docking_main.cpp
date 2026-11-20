@@ -22,6 +22,7 @@
 #include <QStringList>
 #include <QStatusBar>
 #include <QTimer>
+#include <QCloseEvent>
 #include <cstdlib>
 
 #include "ament_index_cpp/get_package_share_directory.hpp"
@@ -30,6 +31,7 @@
 #include "rviz_common/ros_integration/ros_node_abstraction.hpp"
 #include "rviz_common/visualization_frame.hpp"
 #include "ros_session_monitor.hpp"
+#include "simulation_base_jog.hpp"
 #include "std_msgs/msg/string.hpp"
 
 namespace
@@ -368,7 +370,9 @@ class PrototypeWindow : public QMainWindow
 {
 public:
   PrototypeWindow(const QString & config_path, const QString & context, const QString & qml_path)
-  : QMainWindow(), context_(context), config_path_(config_path), session_(new SessionController())
+  : QMainWindow(), context_(context), config_path_(config_path), session_(new SessionController()),
+    sim_base_jog_adapter_(std::make_shared<RosSimBaseJogAdapter>()),
+    sim_base_jog_(new SimulationBaseJog(sim_base_jog_adapter_, this))
   {
     setWindowTitle(QString("MuR Command Center · %1").arg(context_));
     resize(1440, 900);
@@ -377,6 +381,7 @@ public:
     auto * command_center = new QQuickWidget(this);
     command_center->setResizeMode(QQuickWidget::SizeRootObjectToView);
     command_center->rootContext()->setContextProperty("session", session_);
+    command_center->rootContext()->setContextProperty("simBaseJog", sim_base_jog_);
     command_center->setSource(QUrl::fromLocalFile(qml_path));
     setCentralWidget(command_center);
     connect(&ros_spin_timer_, &QTimer::timeout, this, &PrototypeWindow::spin_ros);
@@ -436,6 +441,7 @@ public:
       ros_executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
       rviz_node_ = std::make_shared<rviz_common::ros_integration::RosNodeAbstraction>(
         "mur_rviz_docking_prototype");
+      sim_base_jog_adapter_->setNode(rviz_node_->get_raw_node());
       ros_executor_->add_node(rviz_node_->get_raw_node());
       session_monitor_ = std::make_unique<RosSessionMonitor>(rviz_node_->get_raw_node());
       auto * frame = new rviz_common::VisualizationFrame(rviz_node_);
@@ -471,6 +477,7 @@ public:
       if (ros_executor_ && rviz_node_) ros_executor_->remove_node(rviz_node_->get_raw_node());
       ros_executor_.reset();
       rviz_node_.reset();
+      sim_base_jog_adapter_->setNode({});
       if (rclcpp::ok()) rclcpp::shutdown();
       session_->setDiagnostics({QString("Connection failed · %1").arg(error.what()),
         "External processes were not started or stopped"});
@@ -480,6 +487,7 @@ public:
 
   void disconnect_ros()
   {
+    sim_base_jog_->stop("ROS disconnected");
     ros_spin_timer_.stop();
     diagnosis_timer_.stop();
     if (rviz_dock_) {
@@ -491,15 +499,26 @@ public:
     if (ros_executor_ && rviz_node_) ros_executor_->remove_node(rviz_node_->get_raw_node());
     ros_executor_.reset();
     rviz_node_.reset();
+    sim_base_jog_adapter_->setNode({});
     if (rclcpp::ok()) rclcpp::shutdown();
     session_->setDiagnostics({"Disconnected · external ROS launches and processes were left running"});
     session_->setConnectionState("Disconnected");
+  }
+
+protected:
+  void closeEvent(QCloseEvent * event) override
+  {
+    sim_base_jog_->stop("window closed");
+    if (rviz_node_) disconnect_ros();
+    event->accept();
   }
 
 private:
   QString context_;
   QString config_path_;
   SessionController * session_;
+  std::shared_ptr<RosSimBaseJogAdapter> sim_base_jog_adapter_;
+  SimulationBaseJog * sim_base_jog_;
   std::shared_ptr<rviz_common::ros_integration::RosNodeAbstraction> rviz_node_;
   std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> ros_executor_;
   std::unique_ptr<RosSessionMonitor> session_monitor_;
@@ -530,6 +549,8 @@ int main(int argc, char ** argv)
       // Exercises the public monitor output against a live in-process ROS graph.
     } else if (arguments[i] == "--contract-test-portable-presets") {
       // Exercises portable preset serialization through the session interface.
+    } else if (arguments[i] == "--contract-test-sim-base-jog") {
+      // Exercises hold-to-run behavior against an isolated fake ROS adapter.
     } else if (arguments[i] == "--context" && i + 1 < arguments.size()) {
       context = arguments[++i];
     } else if (arguments[i] == "--help" || arguments[i] == "-h") {
@@ -584,6 +605,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Portable preset contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-sim-base-jog")) {
+    if (!run_sim_base_jog_contract_test()) {
+      qCritical("Simulation base jog contract failed");
+      return 1;
+    }
+    qInfo("Simulation base jog contract passed");
     return 0;
   }
   PrototypeWindow window(config_path, context, qml_path);

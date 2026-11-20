@@ -48,6 +48,16 @@ The host remains a prototype; connecting confirms that its RViz node started,
 but does not prove reachability of every remote ROS endpoint. Full simulation
 and hardware launch flows are not yet wired to the shell.
 
+The Diagnosis view reports ROS graph endpoints and controller-manager state.
+In Hardware mode it also reads the selected robot's base/arm controller
+managers, lift joints, and separate MuR and MiR batteries. Battery percentages
+and lift positions include their data age; values older than three seconds are
+marked stale. MiR's reported remaining runtime is labeled as an estimate and
+has its own age. No dashboard safety state is inferred from ROS graph presence.
+Controller, battery, and lift reads are subscriptions or read-only
+`list_controllers` requests; this status path does not start hardware or issue
+motion commands.
+
 The Robot view includes profile-routed goals and saved poses. Simulation uses
 Nav2 `NavigateToPose` at `/<robot>/navigate_to_pose` and reads fresh
 `PoseStamped` ground truth from `/<robot>/ground_truth/pose`. Hardware uses the
@@ -79,3 +89,21 @@ started as the named `Qualisys Mocap bridge` process by this app exposes the
 stop action. Bridge output and exit state are recorded with the other launch
 logs. Map/TF output is enabled for an app-started bridge, with the existing
 bridge's calibration validation deciding whether it is available.
+
+## Remote simulation process prototype
+
+From the Processes view, select a Simulation preset whose target is a remote
+host and choose **Start remote simulation**. The target must be a host alias or
+hostname accepted by SSH, the remote account must have non-interactive SSH key
+access, and `bash -lc` on that host must find the sourced ROS 2 Jazzy workspace
+and `mur_launch_sim` package. The selected ROS domain and robot name are passed
+to the remote launch. The app records remote stdout/stderr under a host- and
+run-specific log source.
+
+Each launch receives a random run ID and starts in a dedicated `setsid`
+process group. Stop connects over SSH again and checks the recorded PID's
+environment for that exact run ID and its process-group ID before sending
+SIGINT to the group. A foreign process is never selected by name or stopped.
+If SSH or the ownership check fails, the process row reports **Stop failed**
+and the log says the remote run may still be active. This prototype does not
+store SSH credentials; configure SSH keys or an agent on the operator account.

@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <set>
 
 #include <QString>
 
@@ -37,6 +39,50 @@ RosSessionMonitor::RosSessionMonitor(const rclcpp::Node::SharedPtr & node, LogSt
     });
 }
 
+void RosSessionMonitor::configure_hardware_subscriptions(const QString & robot)
+{
+  const auto name = robot.toStdString();
+  if (hardware_robot_ == name) return;
+  hardware_robot_ = name;
+  hardware_subscriptions_.clear();
+  joint_states_subscription_.reset();
+
+  const auto battery_topic = [name](const std::string & suffix) {
+      return "/" + name + "/" + suffix;
+    };
+  auto mur_state = battery_topic("bms_status/battery_state");
+  hardware_status_.expectBattery("MuR", QString::fromStdString(mur_state));
+  hardware_status_.expectBattery("MiR", QString::fromStdString(battery_topic("battery_state")));
+  hardware_subscriptions_.push_back(node_->create_subscription<sensor_msgs::msg::BatteryState>(
+      mur_state, rclcpp::QoS(10), [this, mur_state](sensor_msgs::msg::BatteryState::ConstSharedPtr msg) {
+        hardware_status_.updateBattery("MuR", QString::fromStdString(mur_state), msg->percentage * 100.0,
+          msg->voltage, msg->current, msg->charge, msg->capacity);
+      }));
+  auto mur_soc = battery_topic("bms_status/SOC");
+  hardware_subscriptions_.push_back(node_->create_subscription<std_msgs::msg::Float32>(
+      mur_soc, rclcpp::QoS(10), [this, mur_soc](std_msgs::msg::Float32::ConstSharedPtr msg) {
+        hardware_status_.updateSoc(QString::fromStdString(mur_soc), msg->data);
+      }));
+  auto mir_topic = battery_topic("battery_state");
+  hardware_subscriptions_.push_back(node_->create_subscription<sensor_msgs::msg::BatteryState>(
+      mir_topic, rclcpp::QoS(10), [this, mir_topic](sensor_msgs::msg::BatteryState::ConstSharedPtr msg) {
+        hardware_status_.updateBattery("MiR", QString::fromStdString(mir_topic), msg->percentage * 100.0,
+          msg->voltage, msg->current, msg->charge, msg->capacity);
+      }));
+  auto mir_remaining = battery_topic("battery_time_remaining");
+  hardware_subscriptions_.push_back(node_->create_subscription<std_msgs::msg::Int32>(
+      mir_remaining, rclcpp::QoS(10), [this, mir_remaining](std_msgs::msg::Int32::ConstSharedPtr msg) {
+        hardware_status_.updateRemainingEstimate(QString::fromStdString(mir_remaining), msg->data);
+      }));
+  joint_states_subscription_ = node_->create_subscription<sensor_msgs::msg::JointState>(
+    "/" + name + "/joint_states", rclcpp::QoS(10), [this](sensor_msgs::msg::JointState::ConstSharedPtr msg) {
+      hardware_status_.updateLift(msg->name, msg->position);
+    });
+  controller_states_by_manager_.clear();
+  controller_requests_pending_.clear();
+  controller_clients_.clear();
+}
+
 bool RosSessionMonitor::simulationServerAvailable() const
 {
   const auto graph = node_->get_node_graph_interface();
@@ -63,6 +109,8 @@ QStringList RosSessionMonitor::diagnose(const QString & target, const QString & 
   }
   result << (remote_nodes == 0 ? "ROS graph: no remote nodes discovered in this domain" :
     QString("ROS graph: %1 remote node(s) discovered").arg(remote_nodes));
+
+  if (mode == "Hardware") configure_hardware_subscriptions(robot);
 
   const std::string clock_name = "/clock";
   const auto clock = topics.find(clock_name);
@@ -111,6 +159,7 @@ QStringList RosSessionMonitor::diagnose(const QString & target, const QString & 
   if (!found_action) result << "Actions: no ROS action endpoint topics discovered";
 
   bool found_manager = false;
+  std::set<std::string> available_controller_managers;
   for (const auto & service : services) {
     if (service.first.find("/controller_manager/list_controllers") == std::string::npos) continue;
     const auto expected_manager_type = std::find(service.second.begin(), service.second.end(),
@@ -122,18 +171,17 @@ QStringList RosSessionMonitor::diagnose(const QString & target, const QString & 
       found_manager = true;
       continue;
     }
-    if (queried_manager_ != service.first) {
-      controller_client_ = node_->create_client<controller_manager_msgs::srv::ListControllers>(service.first);
-      queried_manager_ = service.first;
-      controller_request_pending_ = false;
-      controller_states_ = "waiting for response";
-    }
-    if (controller_client_ && !controller_request_pending_ && controller_client_->service_is_ready()) {
+    available_controller_managers.insert(service.first);
+    auto & client = controller_clients_[service.first];
+    if (!client) client = node_->create_client<controller_manager_msgs::srv::ListControllers>(service.first);
+    auto & pending = controller_requests_pending_[service.first];
+    if (!pending && client->service_is_ready()) {
       auto request = std::make_shared<controller_manager_msgs::srv::ListControllers::Request>();
-      controller_request_pending_ = true;
-      controller_client_->async_send_request(request,
-        [this](rclcpp::Client<controller_manager_msgs::srv::ListControllers>::SharedFuture future) {
-          controller_request_pending_ = false;
+      pending = true;
+      const auto manager_name = service.first;
+      client->async_send_request(request,
+        [this, manager_name](rclcpp::Client<controller_manager_msgs::srv::ListControllers>::SharedFuture future) {
+          controller_requests_pending_[manager_name] = false;
           try {
             const auto response = future.get();
             QStringList states;
@@ -141,22 +189,40 @@ QStringList RosSessionMonitor::diagnose(const QString & target, const QString & 
               states << QString("%1: %2").arg(QString::fromStdString(controller.name),
                 QString::fromStdString(controller.state));
             }
-            controller_states_ = states.isEmpty() ? "no controllers reported" : states.join("; ");
+            controller_states_by_manager_[manager_name] = states.isEmpty() ? "no controllers reported" : states.join("; ");
           } catch (const std::exception & error) {
-            controller_states_ = QString("query failed: %1").arg(error.what());
+            controller_states_by_manager_[manager_name] = QString("query failed: %1").arg(error.what());
           }
         });
     }
     result << QString("Controller manager: %1 · %2")
       .arg(QString::fromStdString(service.first), QString::fromStdString(
         service.second.empty() ? "unknown type" : service.second.front()));
-    result << "Controller states: " + controller_states_;
+    result << QString("Controller states (%1): %2").arg(QString::fromStdString(service.first),
+      controller_states_by_manager_.count(service.first) ? controller_states_by_manager_[service.first] : "waiting for response");
     found_manager = true;
   }
   if (!found_manager) {
-    controller_client_.reset();
-    queried_manager_.clear();
     result << "Controller managers: no list_controllers service discovered";
+  }
+
+  if (mode == "Hardware") {
+    const auto robot_name = robot.toStdString();
+    const auto root_manager = "/" + robot_name + "/controller_manager/list_controllers";
+    const auto controller_status = [this, &available_controller_managers](const std::string & manager) {
+        if (!available_controller_managers.count(manager)) {
+          return QString("not reported · list_controllers service missing");
+        }
+        auto state = controller_states_by_manager_.find(manager);
+        return state == controller_states_by_manager_.end() ? QString("not reported · %1 unavailable or waiting")
+          .arg(QString::fromStdString(manager)) : state->second;
+      };
+    result << "Hardware component base: " + controller_status(root_manager);
+    result << "Hardware component left arm: " + controller_status(
+      "/" + robot_name + "/UR10_l/controller_manager/list_controllers");
+    result << "Hardware component right arm: " + controller_status(
+      "/" + robot_name + "/UR10_r/controller_manager/list_controllers");
+    result << hardware_status_.diagnostics(robot);
   }
 
   for (const auto & topic : topics) {

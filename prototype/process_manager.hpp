@@ -14,12 +14,13 @@ class ProcessManager : public QObject
   Q_PROPERTY(QString log READ log NOTIFY logChanged)
 
 public:
-  explicit ProcessManager(QObject * parent = nullptr);
+  explicit ProcessManager(QObject * parent = nullptr, const QString & ssh_program = "ssh");
   ~ProcessManager() override;
 
   QVariantList processes() const;
   QString log() const { return log_; }
   Q_INVOKABLE bool startSimulation(const QString & robot);
+  Q_INVOKABLE bool startRemoteSimulation(const QString & host, int ros_domain, const QString & robot);
   Q_INVOKABLE bool startGazeboView();
   Q_INVOKABLE bool startProcess(const QString & name, const QString & program,
     const QStringList & arguments);
@@ -42,11 +43,18 @@ private:
     int run_number{0};
     int exit_code{-1};
     bool stopping{false};
+    bool remote{false};
+    QString host;
+    QString run_token;
+    qint64 remote_pid{-1};
+    QByteArray remote_handshake;
+    QProcess * stop_process{};
   };
   void appendOutput(ManagedProcess * managed, const QByteArray & bytes, bool stderr_stream);
   void setState(ManagedProcess * managed, const QString & state);
   void appendLog(const QString & line);
   QHash<QString, ManagedProcess *> managed_;
+  QString ssh_program_;
   QString log_;
   LogStore * log_store_{nullptr};
 };

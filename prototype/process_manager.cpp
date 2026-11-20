@@ -1,4 +1,5 @@
 #include "process_manager.hpp"
+#include "log_store.hpp"
 
 #include <QDateTime>
 #include <QProcessEnvironment>
@@ -85,6 +86,9 @@ bool ProcessManager::startProcess(const QString & name, const QString & program,
           (status == QProcess::NormalExit && exit_code == 0 ? "Exited" : "Failed");
         managed->stopping = false;
         setState(managed, final_state);
+        if (log_store_) log_store_->append(managed->log_source,
+          final_state == "Failed" ? "ERROR" : "INFO",
+          QString("Process finished with exit code %1 (%2)").arg(exit_code).arg(final_state));
         appendLog(QString("%1 finished with exit code %2").arg(managed->name).arg(exit_code));
       });
     connect(managed->process, &QProcess::errorOccurred, this,
@@ -92,6 +96,8 @@ bool ProcessManager::startProcess(const QString & name, const QString & program,
         if (error == QProcess::FailedToStart) {
           managed->exit_code = -1;
           setState(managed, "Failed");
+          if (log_store_) log_store_->append(managed->log_source, "ERROR",
+            QString("Process could not start: %1").arg(managed->process->errorString()));
           appendLog(QString("%1 could not start: %2")
             .arg(managed->name, managed->process->errorString()));
         }
@@ -107,6 +113,8 @@ bool ProcessManager::startProcess(const QString & name, const QString & program,
     });
   }
   managed->lines.clear();
+  ++managed->run_number;
+  managed->log_source = QString("%1 · run %2").arg(name).arg(managed->run_number);
   managed->exit_code = -1;
   managed->stopping = false;
   auto environment = QProcessEnvironment::systemEnvironment();
@@ -122,6 +130,8 @@ bool ProcessManager::startProcess(const QString & name, const QString & program,
   setState(managed, "Starting");
   appendLog(QString("Starting %1: %2 %3")
     .arg(name, program, arguments.join(' ')));
+  if (log_store_) log_store_->append(managed->log_source, "INFO",
+    QString("Starting %1: %2 %3").arg(name, program, arguments.join(' ')));
   managed->process->start();
   return true;
 }
@@ -153,14 +163,22 @@ void ProcessManager::stopAll()
   for (const auto & name : names) stopProcess(name);
 }
 
+QString ProcessManager::logSource(const QString & name) const
+{
+  const auto * managed = managed_.value(name, nullptr);
+  return managed ? managed->log_source : QString();
+}
+
 void ProcessManager::appendOutput(ManagedProcess * managed, const QByteArray & bytes,
   bool stderr_stream)
 {
   if (bytes.isEmpty()) return;
   const auto prefix = stderr_stream ? "stderr: " : "";
-  managed->lines.append(QString::fromLocal8Bit(bytes));
-  appendLog(QString("[%1] %2%3").arg(managed->name, prefix,
-    QString::fromLocal8Bit(bytes).trimmed()));
+  const auto text = LogStore::redact(QString::fromLocal8Bit(bytes));
+  managed->lines.append(text);
+  const auto level = stderr_stream ? "ERROR" : "INFO";
+  if (log_store_) log_store_->append(managed->log_source, level, text.trimmed());
+  appendLog(QString("[%1] %2%3").arg(managed->name, prefix, text.trimmed()));
   emit changed();
 }
 
@@ -172,6 +190,8 @@ void ProcessManager::setState(ManagedProcess * managed, const QString & state)
 
 void ProcessManager::appendLog(const QString & line)
 {
-  log_ += QString("%1 %2\n").arg(QDateTime::currentDateTime().toString(Qt::ISODate), line);
+  const auto safe = LogStore::redact(line);
+  log_ += QString("%1 %2\n").arg(QDateTime::currentDateTime().toString(Qt::ISODate), safe);
+  if (log_store_) log_store_->append("Process manager", "INFO", safe);
   emit logChanged();
 }

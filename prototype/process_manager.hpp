@@ -5,6 +5,8 @@
 #include <QProcess>
 #include <QVariantList>
 
+class LogStore;
+
 class ProcessManager : public QObject
 {
   Q_OBJECT
@@ -23,6 +25,8 @@ public:
     const QStringList & arguments);
   Q_INVOKABLE void stopProcess(const QString & name);
   Q_INVOKABLE void stopAll();
+  Q_INVOKABLE QString logSource(const QString & name) const;
+  void setLogStore(LogStore * store) { log_store_ = store; }
 
 signals:
   void changed();
@@ -34,6 +38,8 @@ private:
     QString name;
     QString state{"Stopped"};
     QStringList lines;
+    QString log_source;
+    int run_number{0};
     int exit_code{-1};
     bool stopping{false};
   };
@@ -42,4 +48,5 @@ private:
   void appendLog(const QString & line);
   QHash<QString, ManagedProcess *> managed_;
   QString log_;
+  LogStore * log_store_{nullptr};
 };

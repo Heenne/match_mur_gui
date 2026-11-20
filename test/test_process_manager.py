@@ -51,3 +51,43 @@ def test_fake_launcher_captures_argv_environment_streams_exit_and_owned_stop(tmp
     finally:
         external.terminate()
         external.wait(timeout=5)
+
+
+def test_remote_simulation_uses_selected_host_and_stops_only_its_owned_run(tmp_path):
+    fake_ssh = tmp_path / "fake-ssh"
+    stop_file = tmp_path / "remote-stop"
+    args_file = tmp_path / "ssh-args"
+    fake_ssh.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys, time\n"
+        "args = sys.argv[1:]\n"
+        "with open(os.environ['MUR_FAKE_SSH_ARGS_FILE'], 'a') as f: f.write(repr(args) + '\\n')\n"
+        "script = ' '.join(args)\n"
+        "if 'kill -INT --' in script:\n"
+        " if 'MUR_GUI_RUN_ID=' not in script or '/proc/' not in script or 'sim-host' not in script: sys.exit(51)\n"
+        " pathlib.Path(os.environ['MUR_FAKE_REMOTE_STOP_FILE']).write_text(script)\n"
+        " sys.exit(0)\n"
+        "if 'ros2 launch mur_launch_sim' not in script: sys.exit(52)\n"
+        "print('__MUR_GUI_PID__=4242', flush=True)\n"
+        "print('remote launch ready', flush=True)\n"
+        "while not pathlib.Path(os.environ['MUR_FAKE_REMOTE_STOP_FILE']).exists(): time.sleep(.02)\n"
+        "print('remote launch stopped', flush=True)\n"
+    )
+    fake_ssh.chmod(0o755)
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    environment = os.environ.copy()
+    environment.update({
+        "MUR_FAKE_SSH": str(fake_ssh),
+        "MUR_FAKE_SSH_ARGS_FILE": str(args_file),
+        "MUR_FAKE_REMOTE_STOP_FILE": str(stop_file),
+        "QT_QPA_PLATFORM": "offscreen",
+    })
+    result = subprocess.run(
+        [str(executable), "--contract-test-remote-process-manager"],
+        env=environment, text=True, capture_output=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "Remote process manager contract passed" in result.stderr + result.stdout
+    assert stop_file.exists()
+    assert args_file.exists() and "sim-host" in args_file.read_text()
+    assert "ros2 launch mur_launch_sim" in args_file.read_text()

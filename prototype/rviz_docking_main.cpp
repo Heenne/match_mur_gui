@@ -45,6 +45,7 @@
 #include "process_manager.hpp"
 #include "log_store.hpp"
 #include "log_panel.hpp"
+#include "goals_poses.hpp"
 #include "std_msgs/msg/string.hpp"
 
 namespace
@@ -753,7 +754,10 @@ public:
   PrototypeWindow(const QString & config_path, const QString & context, const QString & qml_path)
   : QMainWindow(), context_(context), config_override_(config_path), session_(new SessionController()),
     sim_base_jog_adapter_(std::make_shared<RosSimBaseJogAdapter>()),
-    sim_base_jog_(new SimulationBaseJog(sim_base_jog_adapter_, this))
+    sim_base_jog_(new SimulationBaseJog(sim_base_jog_adapter_, this)),
+    goals_poses_adapter_(std::make_shared<RosGoalsPosesAdapter>()),
+    goals_poses_(new GoalsPoses(goals_poses_adapter_,
+      QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/poses.json", this))
   {
     setWindowTitle(QString("MuR Command Center · %1").arg(context_));
     resize(1440, 900);
@@ -763,6 +767,7 @@ public:
     command_center->setResizeMode(QQuickWidget::SizeRootObjectToView);
     command_center->rootContext()->setContextProperty("session", session_);
     command_center->rootContext()->setContextProperty("simBaseJog", sim_base_jog_);
+    command_center->rootContext()->setContextProperty("goalsPoses", goals_poses_);
     process_manager_ = new ProcessManager(this);
     command_center->rootContext()->setContextProperty("processes", process_manager_);
     log_store_ = new LogStore(this);
@@ -788,6 +793,8 @@ public:
     }
     connect(session_, &SessionController::changed, this, [this]() {
       ensure_session_context();
+      goals_poses_->setConnected(session_->connectionState() == "Connected" &&
+        (session_->mode() == "Hardware" || session_->mode() == "Simulation"));
       setWindowTitle(QString("MuR Command Center · %1 · %2 · %3")
         .arg(session_->mode(), session_->preset(), session_->robot()));
       if (rviz_dock_) rviz_dock_->setWindowTitle("Visualisierung · " + session_label());
@@ -932,6 +939,8 @@ public:
       rviz_node_->get_raw_node()->set_parameter(
         rclcpp::Parameter("use_sim_time", session_->useSimTime()));
       sim_base_jog_adapter_->setNode(rviz_node_->get_raw_node());
+      goals_poses_adapter_->setNode(rviz_node_->get_raw_node());
+      goals_poses_->setConnected(session_->mode() == "Hardware" || session_->mode() == "Simulation");
       ros_executor_->add_node(rviz_node_->get_raw_node());
       session_monitor_ = std::make_unique<RosSessionMonitor>(rviz_node_->get_raw_node(), log_store_);
       log_store_->append("ROS /rosout", "INFO",
@@ -971,6 +980,8 @@ public:
       ros_executor_.reset();
       rviz_node_.reset();
       sim_base_jog_adapter_->setNode({});
+      goals_poses_adapter_->setNode({});
+      goals_poses_->setConnected(false);
       pending_context_.clear();
       connected_context_.clear();
       if (rclcpp::ok()) rclcpp::shutdown();
@@ -998,6 +1009,8 @@ public:
     ros_executor_.reset();
     rviz_node_.reset();
     sim_base_jog_adapter_->setNode({});
+    goals_poses_adapter_->setNode({});
+    goals_poses_->setConnected(false);
     pending_context_.clear();
     connected_context_.clear();
     if (rclcpp::ok()) rclcpp::shutdown();
@@ -1022,6 +1035,8 @@ private:
   SessionController * session_;
   std::shared_ptr<RosSimBaseJogAdapter> sim_base_jog_adapter_;
   SimulationBaseJog * sim_base_jog_;
+  std::shared_ptr<RosGoalsPosesAdapter> goals_poses_adapter_;
+  GoalsPoses * goals_poses_;
   ProcessManager * process_manager_{nullptr};
   LogStore * log_store_{nullptr};
   LogPanel * log_panel_{nullptr};
@@ -1060,6 +1075,8 @@ int main(int argc, char ** argv)
       // Checks active-profile RViz selection, time source, and unavailable profile errors.
     } else if (arguments[i] == "--contract-test-sim-base-jog") {
       // Exercises hold-to-run behavior against an isolated fake ROS adapter.
+    } else if (arguments[i] == "--contract-test-goals-poses") {
+      // Exercises pose CRUD, stale-pose rejection, and selected-robot routing through a fake adapter.
     } else if (arguments[i] == "--contract-test-remote-discovery") {
       // Exercises DDS environment setup without initializing ROS.
     } else if (arguments[i] == "--contract-test-process-manager") {
@@ -1136,6 +1153,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Simulation base jog contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-goals-poses")) {
+    if (!run_goals_poses_contract_test()) {
+      qCritical("Goals and poses contract failed");
+      return 1;
+    }
+    qInfo("Goals and poses contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-remote-discovery")) {

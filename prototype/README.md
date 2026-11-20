@@ -47,3 +47,12 @@ Robot, Processes, Diagnosis, Logs, and Settings.
 The host remains a prototype; ROS graph connection feedback is limited to the
 RViz node starting. No simulation or hardware launch process is wired to the
 shell.
+
+The Robot view includes profile-routed goals and saved poses. Simulation uses
+Nav2 `NavigateToPose` at `/<robot>/navigate_to_pose` and reads fresh
+`PoseStamped` ground truth from `/<robot>/ground_truth/pose`. Hardware uses the
+MiR `PoseStamped` goal topic and selected robot's cancel topic only when the
+expected message type and receiver are discovered. A profile never falls back
+to the other mode's adapter. Poses are stored under the user's application
+configuration directory; **Import MiR poses** accepts the legacy JSON array
+and `{ "poses": [...] }` formats and merges imported entries by name.

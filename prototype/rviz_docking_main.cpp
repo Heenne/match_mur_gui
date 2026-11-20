@@ -49,6 +49,7 @@
 #include "log_panel.hpp"
 #include "goals_poses.hpp"
 #include "mocap_controller.hpp"
+#include "ur_arm_jog.hpp"
 #include "hardware_status.hpp"
 #include "hardware_start.hpp"
 #include "std_msgs/msg/string.hpp"
@@ -1264,7 +1265,9 @@ public:
     goals_poses_adapter_(std::make_shared<RosGoalsPosesAdapter>()),
     goals_poses_(new GoalsPoses(goals_poses_adapter_,
       QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/poses.json", this)),
-    mocap_(new MocapController(this))
+    mocap_(new MocapController(this)),
+    ur_arm_jog_adapter_(std::make_shared<RosUrArmJogAdapter>()),
+    ur_arm_jog_(new UrArmJog(ur_arm_jog_adapter_, this))
   {
     setWindowTitle(QString("MuR Command Center · %1").arg(context_));
     resize(1440, 900);
@@ -1278,6 +1281,7 @@ public:
     command_center->rootContext()->setContextProperty("mirHardwareControl", mir_hardware_control_);
     mir_hardware_control_->setContext(session_->robot(), session_->mode(), session_->target(), false);
     command_center->rootContext()->setContextProperty("mocap", mocap_);
+    command_center->rootContext()->setContextProperty("urArmJog", ur_arm_jog_);
     process_manager_ = new ProcessManager(this);
     mocap_->setProcessManager(process_manager_);
     command_center->rootContext()->setContextProperty("processes", process_manager_);
@@ -1313,6 +1317,8 @@ public:
         session_->target(), session_->rosDomain(), session_->robot(), session_->connectionState(),
         session_->workspacePath(), "");
       mocap_->setRobot(session_->robot());
+      ur_arm_jog_->setContext(session_->robot(), session_->mode(), session_context(),
+        session_->connectionState() == "Connected");
       goals_poses_->setConnected(session_->connectionState() == "Connected" &&
         (session_->mode() == "Hardware" || session_->mode() == "Simulation"));
       mir_hardware_control_->setContext(session_->robot(), session_->mode(), session_->target(),
@@ -1462,6 +1468,7 @@ public:
       rviz_node_->get_raw_node()->set_parameter(
         rclcpp::Parameter("use_sim_time", session_->useSimTime()));
       sim_base_jog_adapter_->setNode(rviz_node_->get_raw_node());
+      ur_arm_jog_adapter_->setNode(rviz_node_->get_raw_node());
       mir_hardware_adapter_->setNode(rviz_node_->get_raw_node());
       goals_poses_adapter_->setNode(rviz_node_->get_raw_node());
       mocap_->setNode(rviz_node_->get_raw_node());
@@ -1506,6 +1513,7 @@ public:
       ros_executor_.reset();
       rviz_node_.reset();
       sim_base_jog_adapter_->setNode({});
+      ur_arm_jog_adapter_->setNode({});
       mir_hardware_adapter_->setNode({});
       goals_poses_adapter_->setNode({});
       mocap_->setNode({});
@@ -1524,6 +1532,7 @@ public:
   void disconnect_ros()
   {
     sim_base_jog_->stop("ROS disconnected");
+    ur_arm_jog_->stop("ROS disconnected");
     mir_hardware_control_->stop("ROS disconnected");
     ros_spin_timer_.stop();
     diagnosis_timer_.stop();
@@ -1540,6 +1549,7 @@ public:
     ros_executor_.reset();
     rviz_node_.reset();
     sim_base_jog_adapter_->setNode({});
+    ur_arm_jog_adapter_->setNode({});
     mir_hardware_adapter_->setNode({});
     goals_poses_adapter_->setNode({});
     goals_poses_->setConnected(false);
@@ -1555,6 +1565,7 @@ protected:
   void closeEvent(QCloseEvent * event) override
   {
     sim_base_jog_->stop("window closed");
+    ur_arm_jog_->stop("window closed");
     mir_hardware_control_->stop("window closed");
     if (rviz_node_) disconnect_ros();
     event->accept();
@@ -1575,6 +1586,8 @@ private:
   std::shared_ptr<SshHardwareStartAdapter> hardware_start_adapter_;
   HardwareStartController * hardware_start_{nullptr};
   MocapController * mocap_;
+  std::shared_ptr<RosUrArmJogAdapter> ur_arm_jog_adapter_;
+  UrArmJog * ur_arm_jog_;
   ProcessManager * process_manager_{nullptr};
   LogStore * log_store_{nullptr};
   LogPanel * log_panel_{nullptr};
@@ -1625,6 +1638,8 @@ int main(int argc, char ** argv)
       // Exercises pose CRUD, stale-pose rejection, and selected-robot routing through a fake adapter.
     } else if (arguments[i] == "--contract-test-mocap") {
       // Exercises Qualisys status, map output, freeze/resume, and external bridge ownership with a local ROS graph.
+    } else if (arguments[i] == "--contract-test-ur-arm-jog") {
+      // Exercises UR readiness gating and hold-to-run arm motion through an injected fake adapter.
     } else if (arguments[i] == "--contract-test-remote-discovery") {
       // Exercises DDS environment setup without initializing ROS.
     } else if (arguments[i] == "--contract-test-process-manager") {
@@ -1727,6 +1742,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Simulation base jog contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-ur-arm-jog")) {
+    if (!run_ur_arm_jog_contract_test()) {
+      qCritical("UR arm jog contract failed");
+      return 1;
+    }
+    qInfo("UR arm jog contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-mir-hardware-control")) {

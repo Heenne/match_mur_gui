@@ -74,6 +74,27 @@ to the other mode's adapter. Poses are stored under the user's application
 configuration directory; **Import MiR poses** accepts the legacy JSON array
 and `{ "poses": [...] }` formats and merges imported entries by name.
 
+In Hardware mode the Robot view also exposes a selected UR10_l or UR10_r jog
+panel. Before arming, the app checks that `external_control.urp` is reported
+running by the selected arm's dashboard, that the robot is in remote control,
+robot/safety modes and the Cartesian
+controller are current, at least six selected-arm joint positions are fresh,
+and a `TwistStamped` receiver exists at the integrated Cartesian controller's
+command topic. The reverse-interface indicator is explicitly marked inferred:
+the ROS driver exposes no direct reverse TCP connection status, so it is
+derived from the running external-control program and fresh RUNNING robot and
+safety status. Unknown or stale checks block arming and jogging.
+
+Jog requires explicit arming for one selected arm. The six translation/rotation
+directions are hold-to-run, capped at 0.05 m/s and 0.20 rad/s, and send
+`TwistStamped` commands with a 250 ms DDS lifespan. Release, loss of focus,
+readiness, session context, or connection sends a zero command where the
+verified endpoint remains available and otherwise lets the short-lived command
+expire. The red **STOP** area is limited to the selected arm. This view does
+not switch controllers or start the UR driver; the integrated Cartesian
+controller must already be active. The app does not replace the robot's
+safety-rated stop or teach pendant.
+
 The Processes view starts the local MuR620 simulation and manages the Gazebo
 world view as a separate `gz sim -g` client. Starting or stopping the client
 does not stop the simulation server, `/clock`, ROS bridge, or their logs. The

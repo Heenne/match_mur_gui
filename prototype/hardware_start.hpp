@@ -31,7 +31,6 @@ struct HardwareStartConfig
   bool launch_moveit{true};
   int moveit_speed_percent{20};
 };
-
 struct HardwareArmCheck
 {
   QString state{"Unknown"};
@@ -144,4 +143,3 @@ private:
   bool preflight_ready_{false};
   bool busy_{false};
 };
-

@@ -481,4 +481,3 @@ void HardwareStartController::saveOptions()
   settings_->endGroup();
   settings_->sync();
 }
-

@@ -37,4 +37,3 @@ def test_preflight_uses_target_workspace_and_blocks_unknown_arm_state(tmp_path):
     assert result.returncode == 0, result.stderr + result.stdout
     assert "Hardware start contract passed" in result.stderr + result.stdout
     assert args_file.exists()
-

@@ -25,6 +25,7 @@ find_package(action_msgs REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(rviz_common REQUIRED)
 find_package(ament_index_cpp REQUIRED)
+find_package(ur_dashboard_msgs REQUIRED)
 
 add_executable(mur_rviz_docking_prototype
   prototype/rviz_docking_main.cpp
@@ -46,10 +47,12 @@ add_executable(mur_rviz_docking_prototype
   prototype/goals_poses.hpp
   prototype/mocap_controller.cpp
   prototype/mocap_controller.hpp
+  prototype/ur_arm_jog.cpp
+  prototype/ur_arm_jog.hpp
 )
 target_compile_features(mur_rviz_docking_prototype PRIVATE cxx_std_17)
 target_link_libraries(mur_rviz_docking_prototype Qt5::Widgets Qt5::QuickWidgets Qt5::Network)
-ament_target_dependencies(mur_rviz_docking_prototype action_msgs actionlib_msgs ament_index_cpp controller_manager_msgs ewellix_interfaces geometry_msgs mir_srvs nav2_msgs rcl_interfaces rclcpp rosgraph_msgs rviz_common sensor_msgs std_msgs std_srvs tf2_msgs)
+ament_target_dependencies(mur_rviz_docking_prototype action_msgs actionlib_msgs ament_index_cpp controller_manager_msgs ewellix_interfaces geometry_msgs mir_srvs nav2_msgs rcl_interfaces rclcpp rosgraph_msgs rviz_common sensor_msgs std_msgs std_srvs tf2_msgs ur_dashboard_msgs)
 install(TARGETS mur_rviz_docking_prototype DESTINATION lib/${PROJECT_NAME})
 
 install(PROGRAMS
@@ -76,6 +79,8 @@ if(BUILD_TESTING)
   set_tests_properties(hardware_status_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME lift_controller_behavior COMMAND mur_rviz_docking_prototype --contract-test-lift-controller)
   set_tests_properties(lift_controller_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_test(NAME ur_arm_jog_behavior COMMAND mur_rviz_docking_prototype --contract-test-ur-arm-jog)
+  set_tests_properties(ur_arm_jog_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME hardware_start_behavior COMMAND mur_rviz_docking_prototype --contract-test-hardware-start)
   set_tests_properties(hardware_start_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   find_package(ament_cmake_pytest REQUIRED)

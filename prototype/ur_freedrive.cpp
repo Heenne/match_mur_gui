@@ -183,9 +183,13 @@ void RosUrFreedriveAdapter::enter(const QString & robot, const QString & side, s
    auto s=weak.lock(); if (!s || !s->done) return;
    try { if (!f2.get()->ok) { auto_done(s, false, "controller switch failed"); return; } } catch (...) { auto_done(s, false, "controller switch failed"); return; }
    s->list->async_send_request(std::make_shared<State::List::Request>(), [weak](rclcpp::Client<State::List>::SharedFuture f3) {
-    auto s=weak.lock(); if (!s || !s->done) return; bool active=false;
-    try { for (const auto & c : f3.get()->controller) if (c.name==freedrive_name && c.state=="active") active=true; } catch (...) {}
-    auto_done(s, active, active ? "controller active" : "controller state unconfirmed");
+    auto s=weak.lock(); if (!s || !s->done) return; bool active=false; std::set<std::string> inactive;
+    try { for (const auto & c : f3.get()->controller) {
+      if (c.name==freedrive_name && c.state=="active") active=true;
+      if (c.state=="inactive") inactive.insert(c.name);
+    } } catch (...) {}
+    for (const auto & c : s->previous) if (!inactive.count(c)) active=false;
+    auto_done(s, active, active ? "controller active and previous controllers inactive" : "controller state unconfirmed");
    });
   });
  });

@@ -162,7 +162,6 @@ def window(monkeypatch, tmp_path):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     gui = base_gui.MurBaseGui()
     gui.stop_managed_processes = lambda: None
-    gui.ros_worker.set_robot_names = lambda *_args: None
     gui.ros_worker.inhibit_arm_motion = lambda *_args: None
     gui._prepare_arm_motion_profile = lambda *_args: None
     gui.disable_cartesian_motion = lambda *_args: None

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -89,6 +90,9 @@ public:
     const QString & sessionKey, bool connected);
   Q_INVOKABLE void selectArm(const QString & side);
   void setMotionBlocked(bool blocked);
+  void setShutdownInterlock(std::function<bool(const QString &, const QString &)> fn) { shutdown_interlock_ = std::move(fn); }
+  QString robot() const { return robot_; }
+  QString side() const { return side_; }
   Q_INVOKABLE void setArmed(bool armed);
   Q_INVOKABLE void setLinearSpeed(double speed);
   Q_INVOKABLE void setAngularSpeed(double speed);
@@ -119,6 +123,7 @@ private:
   bool context_connected_{false};
   bool readiness_ok_{false};
   bool motion_blocked_{false};
+  std::function<bool(const QString &, const QString &)> shutdown_interlock_;
   bool armed_{false};
   bool holding_{false};
   double linear_speed_{0.01};

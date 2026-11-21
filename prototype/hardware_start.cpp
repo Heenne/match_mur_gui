@@ -446,6 +446,7 @@ void HardwareStartController::runPreflight()
 
 void HardwareStartController::startHardware()
 {
+  if (shutdown_interlock_ && shutdown_interlock_()) { message_ = "Hardware start blocked by UR shutdown interlock"; emit changed(); return; }
   if (busy_ || !adapter_) return;
   if (mode_ != "Hardware" || connection_state_ != "Connected" || !preflight_ready_ ||
     checked_context_ != contextFingerprint()) {

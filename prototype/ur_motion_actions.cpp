@@ -123,7 +123,8 @@ void UrMotionActions::refresh()
 bool UrMotionActions::canStart(QString * reason)
 {
   refresh();
-  if (busy_) *reason = "Another motion is active";
+  if (shutdown_interlock_ && shutdown_interlock_(robot_, side_)) *reason = "UR shutdown interlock";
+  else if (busy_) *reason = "Another motion is active";
   else if (jog_ && (jog_->armed() || jog_->holding())) *reason = "Disarm arm jog first";
   else if (!ready_) *reason = "Selected arm is not ready";
   else return true;

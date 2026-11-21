@@ -83,6 +83,9 @@ public:
   explicit UrMotionActions(std::shared_ptr<UrMotionActionsAdapter> adapter,
     QObject * parent = nullptr);
   void setJog(UrArmJog * jog) { jog_ = jog; }
+  void setShutdownInterlock(std::function<bool(const QString &, const QString &)> fn) { shutdown_interlock_ = std::move(fn); }
+  QString robot() const { return robot_; }
+  QString side() const { return side_; }
   QString selectedArm() const;
   QString readiness() const { return readiness_; }
   bool ready() const { return ready_; }
@@ -129,6 +132,7 @@ private:
 
   std::shared_ptr<UrMotionActionsAdapter> adapter_;
   UrArmJog * jog_{nullptr};
+  std::function<bool(const QString &, const QString &)> shutdown_interlock_;
   QTimer timer_;
   QString preset_;
   QString mode_;

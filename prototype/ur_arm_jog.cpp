@@ -148,7 +148,7 @@ void UrArmJog::setMotionBlocked(bool blocked)
 void UrArmJog::setArmed(bool armed)
 {
   refresh();
-  const bool can_arm = armed && !motion_blocked_ && mode_ == "Hardware" && context_connected_ &&
+  const bool can_arm = armed && !motion_blocked_ && !(shutdown_interlock_ && shutdown_interlock_(robot_, side_)) && mode_ == "Hardware" && context_connected_ &&
     !robot_.isEmpty() && readiness_ok_;
   if (armed && !can_arm) {
     armed_ = false;
@@ -198,7 +198,7 @@ void UrArmJog::refresh()
 
 bool UrArmJog::press(const QString & axis)
 {
-  if (!armed_ || mode_ != "Hardware" || !context_connected_ || robot_.isEmpty()) {
+  if (!armed_ || (shutdown_interlock_ && shutdown_interlock_(robot_, side_)) || mode_ != "Hardware" || !context_connected_ || robot_.isEmpty()) {
     setStatus("Jog disabled · explicitly arm a ready UR arm in Hardware mode");
     return false;
   }

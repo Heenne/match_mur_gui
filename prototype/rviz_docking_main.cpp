@@ -745,6 +745,7 @@ public:
   HardwarePreflightResult preflight;
   int preflight_calls{0};
   int launch_calls{0};
+  int prepare_calls{0};
   int sync_calls{0};
   int build_calls{0};
   HardwareStartConfig last_config;
@@ -760,6 +761,10 @@ public:
     ++launch_calls;
     last_config = config;
     callback({true, "Fake launch accepted"});
+  }
+  void prepareAmcl(const HardwareStartConfig & config, ActionCallback callback) override
+  {
+    ++prepare_calls; last_config = config; callback({true, "Fake AMCL preparation"});
   }
   void syncSource(const HardwareStartConfig & config, ActionCallback callback) override
   {
@@ -857,6 +862,49 @@ bool run_hardware_start_contract_test()
   return true;
 }
 
+bool run_localization_graph_contract_test()
+{
+  rclcpp::init(0, nullptr);
+  auto observer = std::make_shared<rclcpp::Node>("localization_contract_observer");
+  auto fixture = std::make_shared<rclcpp::Node>("localization_contract_fixture");
+  QTemporaryDir directory;
+  HardwareStartController controller(std::make_shared<FakeHardwareStartAdapter>(), nullptr, directory.filePath("settings.ini"));
+  controller.setContext("Localization graph", "Hardware", "lab-host", 62, "mur620c", "Connected", "", "");
+  controller.setNode(observer);
+  auto source = fixture->create_publisher<std_msgs::msg::String>("/mur620c/localization_source", rclcpp::QoS(1).transient_local());
+  auto pose = fixture->create_publisher<geometry_msgs::msg::PoseStamped>("/mur620c/mir_pose_stamped_simple", 10);
+  auto amcl = fixture->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/mur620c/localization/amcl_pose", 10);
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(observer);
+  executor.add_node(fixture);
+  bool observed = false;
+  for (int i = 0; i < 100; ++i) {
+    std_msgs::msg::String selected; selected.data = "mir"; source->publish(selected);
+    geometry_msgs::msg::PoseStamped current; current.header.frame_id = "map"; current.header.stamp = fixture->now(); pose->publish(current);
+    executor.spin_some(); QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    if (controller.activeLocalization().contains("mir") && controller.localizationState() == "Ready") { observed = true; break; }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  controller.setOption("localization_source", "amcl");
+  for (int i = 0; i < 30; ++i) { executor.spin_some(); QCoreApplication::processEvents(QEventLoop::AllEvents, 10); std::this_thread::sleep_for(std::chrono::milliseconds(20)); }
+  observed = observed && controller.localizationDetail().contains("AMCL adapter detected");
+  for (int i = 0; i < 50; ++i) {
+    std_msgs::msg::String selected; selected.data = "amcl"; source->publish(selected);
+    geometry_msgs::msg::PoseStamped current; current.header.frame_id = "map"; current.header.stamp = fixture->now(); pose->publish(current);
+    executor.spin_some(); QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    if (controller.activeLocalization().contains("amcl") && controller.localizationState() == "Ready") break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  observed = observed && controller.activeLocalization().contains("amcl") && controller.localizationState() == "Ready";
+  for (int i = 0; i < 70; ++i) { executor.spin_some(); QCoreApplication::processEvents(QEventLoop::AllEvents, 10); std::this_thread::sleep_for(std::chrono::milliseconds(20)); }
+  observed = observed && controller.localizationState() != "Ready" && controller.activeLocalization().contains("Unknown");
+  controller.setContext("Localization graph", "Hardware", "lab-host", 62, "mur620d", "Connected", "", "");
+  observed = observed && !controller.activeLocalization().contains("mir");
+  controller.setNode({});
+  executor.remove_node(observer); executor.remove_node(fixture); rclcpp::shutdown();
+  return observed;
+}
+
 bool run_localization_selection_contract_test()
 {
   QTemporaryDir directory;
@@ -891,6 +939,8 @@ bool run_localization_selection_contract_test()
   if (adapter->launch_calls != 1 || adapter->last_config.localization_source != "mocap") return false;
 
   controller.setOption("localization_source", "amcl");
+  controller.prepareAmcl();
+  if (adapter->prepare_calls != 1 || adapter->last_config.robot != "mur620d") return false;
   if (!controller.localizationDetail().contains("adapter") || controller.localizationState() != "Unknown") return false;
   controller.runPreflight();
   controller.startHardware();
@@ -1562,6 +1612,7 @@ public:
       mir_hardware_adapter_->setNode(rviz_node_->get_raw_node());
       goals_poses_adapter_->setNode(rviz_node_->get_raw_node());
       mocap_->setNode(rviz_node_->get_raw_node());
+      hardware_start_->setNode(rviz_node_->get_raw_node());
       goals_poses_->setConnected(session_->mode() == "Hardware" || session_->mode() == "Simulation");
       ros_executor_->add_node(rviz_node_->get_raw_node());
       session_monitor_ = std::make_unique<RosSessionMonitor>(rviz_node_->get_raw_node(), log_store_);
@@ -1608,6 +1659,7 @@ public:
       mir_hardware_adapter_->setNode({});
       goals_poses_adapter_->setNode({});
       mocap_->setNode({});
+      hardware_start_->setNode({});
       goals_poses_->setConnected(false);
       pending_context_.clear();
       connected_context_.clear();
@@ -1635,6 +1687,7 @@ public:
     }
     session_monitor_.reset();
     mocap_->setNode({});
+    hardware_start_->setNode({});
     session_->setSimulationServerAvailable(false);
     log_store_->append("ROS /rosout", "WARN", "ROS session disconnected; live /rosout messages are unavailable.");
     if (ros_executor_ && rviz_node_) ros_executor_->remove_node(rviz_node_->get_raw_node());
@@ -1725,6 +1778,8 @@ int main(int argc, char ** argv)
       // Exercises height freshness, selected-side routing, bounds, and lift stop through a fake adapter.
     } else if (arguments[i] == "--contract-test-hardware-start") {
       // Exercises safety-gated hardware start, profile persistence, and explicit sync/build actions via a fake adapter.
+    } else if (arguments[i] == "--contract-test-localization-graph") {
+      // Exercises live localization source and data through a local ROS graph.
     } else if (arguments[i] == "--contract-test-localization-source") {
       // Exercises persistent source selection, availability gating and next-start routing.
     } else if (arguments[i] == "--contract-test-portable-presets") {
@@ -1824,6 +1879,9 @@ int main(int argc, char ** argv)
     }
     qInfo("Hardware start contract passed");
     return 0;
+  }
+  if (arguments.contains("--contract-test-localization-graph")) {
+    return run_localization_graph_contract_test() ? 0 : 1;
   }
   if (arguments.contains("--contract-test-localization-source")) {
     if (!run_localization_selection_contract_test()) {

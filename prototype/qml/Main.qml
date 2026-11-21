@@ -107,6 +107,12 @@ Item {
                             Layout.preferredHeight: 470
                             visible: session.mode === "Hardware"
                         }
+                        Panels.LiftPanel {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 300
+                            controller: liftController
+                            sessionController: session
+                        }
                         Panels.GoalsPoses { Layout.fillWidth: true; Layout.preferredHeight: 440; goals: goalsPoses; sessionController: session }
                     }
                 }

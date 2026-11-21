@@ -10,6 +10,7 @@
 #include <QObject>
 #include <QString>
 #include <QTimer>
+#include <QSettings>
 
 #include "ewellix_interfaces/msg/command.hpp"
 #include "ewellix_interfaces/msg/state.hpp"
@@ -118,6 +119,7 @@ private:
   void setStatus(const QString & status);
 
   std::shared_ptr<LiftAdapter> adapter_;
+  std::unique_ptr<QSettings> settings_;
   QTimer repeat_timer_;
   QTimer refresh_timer_;
   QString robot_;
@@ -136,6 +138,7 @@ private:
   bool can_lift_down_{false};
   bool holding_{false};
   bool context_connected_{false};
+  bool limits_valid_{true};
   QString status_{"Disconnected · choose and connect a hardware target"};
 };
 

@@ -6,6 +6,12 @@
 #include <QMap>
 #include <QSettings>
 #include <QStringList>
+#include <QTimer>
+#include <chrono>
+#include "rclcpp/rclcpp.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
+#include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
+#include "std_msgs/msg/string.hpp"
 
 #include <functional>
 #include <memory>
@@ -60,6 +66,7 @@ public:
   virtual ~HardwareStartAdapter() = default;
   virtual void runPreflight(const HardwareStartConfig & config, PreflightCallback callback) = 0;
   virtual void startHardware(const HardwareStartConfig & config, ActionCallback callback) = 0;
+  virtual void prepareAmcl(const HardwareStartConfig &, ActionCallback callback) { callback({false, "AMCL preparation is not supported by this adapter."}); }
   virtual void syncSource(const HardwareStartConfig & config, ActionCallback callback) = 0;
   virtual void buildWorkspace(const HardwareStartConfig & config, ActionCallback callback) = 0;
 };
@@ -74,6 +81,7 @@ public:
     const QString & ssh_program = "ssh", const QString & rsync_program = "rsync");
   void runPreflight(const HardwareStartConfig & config, PreflightCallback callback) override;
   void startHardware(const HardwareStartConfig & config, ActionCallback callback) override;
+  void prepareAmcl(const HardwareStartConfig & config, ActionCallback callback) override;
   void syncSource(const HardwareStartConfig & config, ActionCallback callback) override;
   void buildWorkspace(const HardwareStartConfig & config, ActionCallback callback) override;
 private:
@@ -94,6 +102,7 @@ class HardwareStartController : public QObject
   Q_PROPERTY(QVariantMap options READ options NOTIFY changed)
   Q_PROPERTY(QString localizationState READ localizationState NOTIFY changed)
   Q_PROPERTY(QString localizationDetail READ localizationDetail NOTIFY changed)
+  Q_PROPERTY(QString activeLocalization READ activeLocalization NOTIFY changed)
   Q_PROPERTY(bool preflightReady READ preflightReady NOTIFY changed)
   Q_PROPERTY(bool busy READ busy NOTIFY changed)
 
@@ -106,6 +115,8 @@ public:
   QVariantMap options() const { return options_; }
   QString localizationState() const;
   QString localizationDetail() const;
+  QString activeLocalization() const { return active_localization_; }
+  void setNode(rclcpp::Node::SharedPtr node);
   bool preflightReady() const { return preflight_ready_; }
   bool busy() const { return busy_; }
 
@@ -118,6 +129,7 @@ public:
     const QString & detail);
   Q_INVOKABLE void runPreflight();
   Q_INVOKABLE void startHardware();
+  Q_INVOKABLE void prepareAmcl();
   Q_INVOKABLE void syncSource();
   Q_INVOKABLE void buildWorkspace();
 
@@ -125,6 +137,8 @@ signals:
   void changed();
 
 private:
+  void resetLocalizationSubscriptions();
+  void refreshLocalization();
   HardwareStartConfig config() const;
   QString contextFingerprint() const;
   void invalidatePreflight(const QString & reason);
@@ -144,6 +158,15 @@ private:
   QString remote_workspace_;
   QVariantMap options_;
   QMap<QString, QVariantMap> localization_statuses_;
+  rclcpp::Node::SharedPtr node_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr localization_source_subscription_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr localization_pose_subscription_;
+  QTimer localization_timer_;
+  QString reported_source_;
+  QString active_localization_{"Unknown · no confirmed localization source"};
+  std::chrono::steady_clock::time_point pose_received_{};
+  bool have_localization_pose_{false};
+  bool amcl_adapter_available_{false};
   QVariantList checks_;
   QString state_{"Idle"};
   QString message_{"Connect to the selected hardware target, then run preflight."};

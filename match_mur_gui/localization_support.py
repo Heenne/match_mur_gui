@@ -26,7 +26,7 @@ def main():
     parser.add_argument('--mode', choices=['mocap', 'amcl'], required=True)
     parser.add_argument('--robot', choices=['mur620a', 'mur620b', 'mur620c', 'mur620d'], default='mur620c')
     args = parser.parse_args()
-    directory = Path(os.environ['WS'])/'src/match_mur_gui/logs/localization'
+    directory = Path(os.environ.get('XDG_STATE_HOME', Path.home()/'.local/state'))/'match_mur_gui/localization'
     directory.mkdir(parents=True, exist_ok=True)
     domain = os.environ.get('ROS_DOMAIN_ID', '62')
     lock_path = directory/(args.mode+'_'+(args.robot if args.mode == 'amcl' else 'shared')+'_'+domain+'.lock')
@@ -69,6 +69,11 @@ def main():
                     raise RuntimeError('AMCL-Prozess fehlt; ein alter Lokalisierungsadapter läuft noch. '
                                        'Die alte Lokalisierung auf ihrem Rechner beenden und erneut starten.')
                 else:
+                    from ament_index_python.packages import get_package_share_directory
+                    for package in ('match_mur_navigation', 'nav2_amcl', 'nav2_map_server', 'nav2_lifecycle_manager'):
+                        get_package_share_directory(package)
+                    from match_mur_navigation.saved_map import default_map, map_metadata
+                    map_metadata(default_map())
                     command = amcl_launch_arguments(args.robot, node.count_publishers(ns+'/map') > 0, directory)
                     child = subprocess.Popen(command, start_new_session=True)
                     node.get_logger().info('AMCL gestartet: '+args.robot)

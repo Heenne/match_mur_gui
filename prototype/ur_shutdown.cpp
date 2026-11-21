@@ -77,7 +77,8 @@ QString UrShutdown::targets() const {
 }
 bool UrShutdown::prepare() {
   static const QRegularExpression id("^[A-Za-z][A-Za-z0-9_]*$");
-  if (busy_ || selected_.isEmpty() || mode_ != "Hardware" || connection_ != "Connected" || host_.isEmpty() || !id.match(robot_).hasMatch() || !adapter_ || !stop_ || !motion_busy_ || (start_busy_ && start_busy_())) {
+  static const QRegularExpression host("^[A-Za-z0-9][A-Za-z0-9.-]*$");
+  if (busy_ || selected_.isEmpty() || mode_ != "Hardware" || connection_ != "Connected" || !host.match(host_).hasMatch() || !id.match(robot_).hasMatch() || !adapter_ || !stop_ || !motion_busy_ || (start_busy_ && start_busy_())) {
     results_ = "Shutdown blocked: select configured arms on a connected hardware target and wait for hardware startup."; emit changed(); return false;
   }
   prepared_ = targets(); emit changed(); return true;
@@ -99,7 +100,8 @@ void UrShutdown::refresh() {
     QPointer<UrShutdown> guard(this);
     adapter_->start(run_host_, run_robot_, run_workspace_, side, [guard, side](bool ok, const QString & detail) {
       if (!guard) return;
-      guard->results_ += guard->run_host_ + "/" + guard->run_robot_ + "/UR10_" + side + ": " + (ok ? "Accepted: " : "Failed or unconfirmed: ") + detail + "\n";
+      const auto target = guard->run_host_ + "/" + guard->run_robot_ + "/UR10_" + side + ": ";
+      guard->results_.replace(target + "shutting down\n", target + (ok ? "Accepted: " : "Failed or unconfirmed: ") + detail + "\n");
       guard->pending_.removeAll(side);
       if (guard->pending_.isEmpty()) { guard->busy_ = false; guard->launching_ = false; }
       emit guard->changed();

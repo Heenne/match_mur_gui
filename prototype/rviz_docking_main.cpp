@@ -1422,7 +1422,17 @@ public:
     hardware_start_->setShutdownInterlock([this]() {
       return shutdown_->busy() || shutdown_->anyInhibited(session_->target(), session_->robot());
     });
-    shutdown_->setStartBusyHook([this]() { return hardware_start_->busy(); });
+    shutdown_->setStartBusyHook([this]() {
+      if (hardware_start_->busy()) return true;
+      for (const auto & item : process_manager_->processes()) {
+        const auto process = item.toMap();
+        const auto state = process.value("state").toString();
+        if (process.value("name").toString() == "Hardware · " + session_->robot() &&
+            process.value("host").toString() == session_->target() &&
+            (state == "Connecting" || state == "Starting" || state == "Stopping")) return true;
+      }
+      return false;
+    });
     shutdown_->setMotionHooks([this](const QString & robot, const QString & side) {
       if (ur_arm_jog_->robot() == robot && ur_arm_jog_->side() == side) ur_arm_jog_->stop("UR shutdown");
       if (motion_actions_->robot() == robot && motion_actions_->side() == side) motion_actions_->cancel();

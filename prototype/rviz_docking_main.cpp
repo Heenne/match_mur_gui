@@ -1444,7 +1444,7 @@ public:
         const auto state = process.value("state").toString();
         if (process.value("name").toString() == "Hardware · " + session_->robot() &&
             process.value("host").toString() == session_->target() &&
-            (state == "Connecting" || state == "Starting" || state == "Stopping")) return true;
+            (state == "Connecting" || state == "Starting" || state == "Running" || state == "Stopping" || state == "Stop unconfirmed" || state == "Stop failed")) return true;
       }
       return false;
     });

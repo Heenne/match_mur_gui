@@ -79,7 +79,7 @@ bool UrShutdown::prepare() {
   static const QRegularExpression id("^[A-Za-z][A-Za-z0-9_]*$");
   static const QRegularExpression host("^[A-Za-z0-9][A-Za-z0-9.-]*$");
   if (busy_ || selected_.isEmpty() || mode_ != "Hardware" || connection_ != "Connected" || !host.match(host_).hasMatch() || !id.match(robot_).hasMatch() || !adapter_ || !stop_ || !motion_busy_ || (start_busy_ && start_busy_())) {
-    results_ = "Shutdown blocked: select configured arms on a connected hardware target and wait for hardware startup."; emit changed(); return false;
+    results_ = "Shutdown blocked: select configured arms on a connected hardware target and stop any active app-owned hardware launch first."; emit changed(); return false;
   }
   prepared_ = targets(); emit changed(); return true;
 }

@@ -124,7 +124,10 @@ bool ProcessManager::startRemoteHardware(const QString & host, int ros_domain, c
   if (options.value("arm_l", false).toBool()) arms << "UR10_l";
   if (options.value("arm_r", false).toBool()) arms << "UR10_r";
   if (arms.isEmpty() && !options.value("launch_mir", false).toBool()) return false;
+  const auto localization = options.value("localization_source", "mir").toString();
+  if (localization != "mir" && localization != "mocap" && localization != "amcl") return false;
   QStringList args{
+    "mir_localization_source:=" + localization,
     "robot_name:=" + robot, "robot_profile:=" + robot,
     QString("launch_ur_r:=%1").arg(options.value("arm_r", false).toBool() ? "true" : "false"),
     QString("launch_ur_l:=%1").arg(options.value("arm_l", false).toBool() ? "true" : "false"),

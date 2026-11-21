@@ -794,6 +794,7 @@ bool run_hardware_start_contract_test()
   controller.setOption("launch_mir", true);
   controller.setOption("launch_cameras", true);
   controller.setOption("moveit_speed_percent", 35);
+  controller.setLocalizationStatus("mir", "Ready", "MiR source adapter confirmed");
 
   auto unsafe_adapter = std::make_shared<FakeHardwareStartAdapter>();
   unsafe_adapter->preflight.host_ready = true;
@@ -852,6 +853,57 @@ bool run_hardware_start_contract_test()
       result.arms.value("UR10_r").state != "Unknown") return false;
   }
   return true;
+}
+
+bool run_localization_selection_contract_test()
+{
+  QTemporaryDir directory;
+  if (!directory.isValid()) return false;
+  const auto settings_path = directory.filePath("settings.ini");
+  auto adapter = std::make_shared<FakeHardwareStartAdapter>();
+  adapter->preflight.host_ready = true;
+  adapter->preflight.host_detail = "Host ready";
+  adapter->preflight.arms.insert("UR10_l", {"Ready", "Dashboard safety confirmed"});
+  adapter->preflight.arms.insert("UR10_r", {"Ready", "Dashboard safety confirmed"});
+
+  HardwareStartController controller(adapter, nullptr, settings_path);
+  controller.setContext("Localization", "Hardware", "lab-host", 62, "mur620c", "Connected", "/tmp/ws", "$HOME/colcon_ws");
+  if (controller.options().value("localization_source").toString() != "mir") return false;
+  controller.setOption("launch_mir", true);
+  controller.setOption("localization_source", "mocap");
+  if (controller.options().value("localization_source").toString() != "mocap") return false;
+  controller.setLocalizationStatus("mocap", "Blocked", "Map pose is stale; /qualisys_map/mur620c/pose missing");
+  if (controller.localizationState() != "Blocked" ||
+    !controller.localizationDetail().contains("stale")) return false;
+  controller.runPreflight();
+  controller.startHardware();
+  if (adapter->launch_calls != 0 || controller.state() != "Blocked" ||
+    !controller.message().contains("Map pose is stale")) return false;
+
+  controller.setLocalizationStatus("mocap", "Ready", "Fresh map pose and map → mocap TF");
+  controller.setContext("Localization", "Hardware", "other-host", 62, "mur620d", "Connected", "/tmp/ws", "$HOME/colcon_ws");
+  if (controller.localizationState() != "Unknown") return false;
+  controller.setLocalizationStatus("mocap", "Ready", "Fresh map pose and map → mocap TF");
+  controller.runPreflight();
+  controller.startHardware();
+  if (adapter->launch_calls != 1 || adapter->last_config.localization_source != "mocap") return false;
+
+  controller.setOption("localization_source", "amcl");
+  if (!controller.localizationDetail().contains("adapter") || controller.localizationState() != "Unknown") return false;
+  controller.runPreflight();
+  controller.startHardware();
+  if (adapter->launch_calls != 1 || !controller.message().contains("adapter")) return false;
+  controller.setOption("localization_source", "mocap");
+
+  auto invalid = std::make_shared<FakeHardwareStartAdapter>();
+  HardwareStartController invalid_source(invalid, nullptr, directory.filePath("invalid.ini"));
+  invalid_source.setContext("Localization", "Hardware", "lab-host", 62, "mur620c", "Connected", "/tmp/ws", "$HOME/colcon_ws");
+  invalid_source.setOption("localization_source", "somewhere");
+  if (invalid_source.options().value("localization_source").toString() != "mir") return false;
+
+  HardwareStartController restored(std::make_shared<FakeHardwareStartAdapter>(), nullptr, settings_path);
+  restored.setContext("Localization", "Hardware", "lab-host", 62, "mur620c", "Connected", "/tmp/ws", "$HOME/colcon_ws");
+  return restored.options().value("localization_source").toString() == "mocap";
 }
 
 bool run_portable_preset_contract_test()
@@ -1207,7 +1259,7 @@ bool run_remote_process_manager_contract_test()
         qCritical("remote simulation stop marker could not be removed: %s exists=%d", qPrintable(stop_file), QFileInfo::exists(stop_file)); return false;
       }
       QVariantMap options{{"arm_l", false}, {"arm_r", true}, {"launch_mir", true},
-        {"launch_cameras", true}, {"integrated_controller", true}, {"use_ft_sensor", false},
+        {"launch_cameras", true}, {"localization_source", "mocap"}, {"integrated_controller", true}, {"use_ft_sensor", false},
         {"require_wrench", true}, {"collision_avoidance", false}, {"collision_markers", true},
         {"zero_admittance", true}, {"launch_moveit", true}};
       const QVariantMap no_components{{"arm_l", false}, {"arm_r", false}, {"launch_mir", false}};
@@ -1292,6 +1344,12 @@ public:
     hardware_start_->setContext(session_->preset(), session_->mode(), session_->target(),
       session_->rosDomain(), session_->robot(), session_->connectionState(), session_->workspacePath(), "");
     command_center->rootContext()->setContextProperty("hardwareStart", hardware_start_);
+    connect(mocap_, &MocapController::changed, this, [this]() {
+      if (session_->connectionState() != "Connected") return;
+      const auto detail = mocap_->mapStatus();
+      const bool ready = detail == "Map pose and map → mocap TF active";
+      hardware_start_->setLocalizationStatus("mocap", ready ? "Ready" : "Waiting", detail);
+    });
     log_store_->append("ROS /rosout", "WARN",
       "Live ROS logs are unavailable until this session connects to a ROS graph.");
     log_panel_ = new LogPanel(log_store_);
@@ -1624,6 +1682,8 @@ int main(int argc, char ** argv)
       // Exercises missing, current, and stale telemetry through an injected clock and message seam.
     } else if (arguments[i] == "--contract-test-hardware-start") {
       // Exercises safety-gated hardware start, profile persistence, and explicit sync/build actions via a fake adapter.
+    } else if (arguments[i] == "--contract-test-localization-source") {
+      // Exercises persistent source selection, availability gating and next-start routing.
     } else if (arguments[i] == "--contract-test-portable-presets") {
       // Exercises portable preset serialization through the session interface.
     } else if (arguments[i] == "--contract-test-gazebo-preset") {
@@ -1710,6 +1770,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("Hardware start contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-localization-source")) {
+    if (!run_localization_selection_contract_test()) {
+      qCritical("Localization source selection contract failed");
+      return 1;
+    }
+    qInfo("Localization source selection contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-portable-presets")) {

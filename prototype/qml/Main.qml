@@ -101,6 +101,7 @@ Item {
                         width: parent.width
                         spacing: 12
                         Panels.SimBaseJog { Layout.fillWidth: true; Layout.preferredHeight: 260; visible: session.mode === "Simulation" }
+                        Panels.UrFreedrive { Layout.fillWidth: true; Layout.preferredHeight: 150; controller: urFreedrive; visible: session.mode === "Hardware" }
                         Panels.UrMotionActions { Layout.fillWidth: true; Layout.preferredHeight: 480; controller: urMotionActions; visible: session.mode === "Hardware" }
                         Panels.UrArmJog { Layout.fillWidth: true; Layout.preferredHeight: 610; controller: urArmJog; visible: session.mode === "Hardware" }
                         Panel { Layout.fillWidth: true; Layout.preferredHeight: 100; heading: "Robot controls are available in the hardware arm panel"; visible: session.mode !== "Simulation" && session.view !== "Robot" }

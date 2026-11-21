@@ -10,26 +10,40 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
-  <exec_depend>action_msgs</exec_depend>
+  <build_depend>qtbase5-dev</build_depend>
+  <build_depend>qtdeclarative5-dev</build_depend>
+  <depend>controller_manager_msgs</depend>
+  <depend>ewellix_interfaces</depend>
+  <depend>ur_dashboard_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>rviz_common</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav2_msgs</depend>
+  <build_depend>actionlib_msgs</build_depend>
+  <depend>rosgraph_msgs</depend>
+  <depend>rcl_interfaces</depend>
+  <depend>ament_index_cpp</depend>
+
+  <depend>action_msgs</depend>
   <exec_depend>actionlib_msgs</exec_depend>
   <exec_depend>moveit_msgs</exec_depend>
-  <exec_depend>controller_manager_msgs</exec_depend>
-  <exec_depend>ewellix_interfaces</exec_depend>
-  <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
-  <exec_depend>mir_srvs</exec_depend>
+  <depend>mir_srvs</depend>
   <exec_depend>mur_control</exec_depend>
   <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>moveit_py</exec_depend>
   <exec_depend>python3-pyqt5</exec_depend>
+  <exec_depend>qml-module-qtquick-controls2</exec_depend>
+  <exec_depend>qml-module-qtquick-dialogs</exec_depend>
+  <exec_depend>qml-module-qtquick-layouts</exec_depend>
+  <exec_depend>qmlscene</exec_depend>
   <exec_depend>rclpy</exec_depend>
-  <exec_depend>rcl_interfaces</exec_depend>
-  <exec_depend>sensor_msgs</exec_depend>
-  <exec_depend>std_msgs</exec_depend>
-  <exec_depend>std_srvs</exec_depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>tf2_msgs</depend>
   <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>ur_dashboard_msgs</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>trajectory_msgs</test_depend>

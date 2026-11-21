@@ -142,6 +142,25 @@ python3 scripts/install_gui_desktop.py --app all
 
 Danach in der Ubuntu-Anwendungssuche nach „MuR Basis-GUI“, „MuR Mocap“, „MuR Cooperative Handling“, „MuR OAK Kamera“ oder „MuR Navigation“ suchen oder die gleichnamigen Desktop-Icons doppelklicken. Der Installer prüft die vorhandenen ROS-Executables, bevor er Dateien anlegt. Jede Verknüpfung lädt beim Start `/opt/ros/jazzy/setup.bash` und das Workspace-Setup; ein Terminal ist nicht nötig. Ohne vorgegebene `ROS_DOMAIN_ID` verwendet sie Domain 62. Sie startet nur die gewählte GUI und keine Roboterhardware.
 
+### Ubuntu 24.04 `.deb` ohne Workspace
+
+Pushes auf `main` erzeugen einen Ubuntu 24.04 / ROS 2 Jazzy `.deb` als
+GitHub Actions-Artefakt. Das Artefakt **match-mur-gui-ubuntu-24.04-ros-jazzy**
+herunterladen und installieren:
+
+```bash
+sudo apt install ./match-mur-gui_*.deb
+```
+
+APT installiert die im Paket deklarierten ROS-, Qt- und QML-Laufzeitabhängigkeiten.
+Auf dem Rechner müssen die passenden ROS-2-Jazzy-Paketquellen eingerichtet
+sein. Danach erscheint **MuR Basis-GUI** in der Ubuntu-Anwendungssuche. Der
+Starteintrag lädt `/opt/ros/$ROS_DISTRO/setup.bash` (standardmäßig Jazzy) und
+startet die installierte GUI, ohne einen Quell-Workspace vorauszusetzen. Ohne
+gesetztes `WS` verwendet sie `$XDG_DATA_HOME/match_mur_gui` (sonst
+`~/.local/share/match_mur_gui`) für benutzerschreibbare GUI-Daten. Für
+Hardwarezugriff den Remote-Workspace im GUI-Feld **Remote WS** konfigurieren.
+
 Alle GUIs mit der gemeinsamen MuR-Basis konfigurieren vor dem ROS-Start automatisch
 direkte DDS-Peers für die per SSH erreichbaren Hostnamen `mur620a` bis `mur620d`. Dadurch
 funktioniert die Verbindung auch ohne zuverlässige Multicast-Erkennung. Die
@@ -195,3 +214,9 @@ Herstellerquellen:
 - [UR: Power Down The Robot](https://www.universal-robots.com/manuals/EN/HTML/SW5_24/Content/prod-usr-man/complianceUR5e/H_g5_sections/mechanical_interface_g5/powerdown.htm)
 - [UR: Dashboard-Befehle für e-Series](https://www.universal-robots.com/manuals/EN/HTML/SW5_23/Content/prod-dashboard/Dashboard_table.htm)
 - [UR: Dashboard-Befehle für CB-Series](https://www.universal-robots.com/articles/ur/dashboard-server-cb-series-port-29999/)
+
+### Command Center: Endpunkte im Profil
+
+Im Command Center werden bewegende Basis- und Navigationsendpunkte unter **Settings → Edit profile** für jedes Preset ausdrücklich konfiguriert. Leere Felder deaktivieren die entsprechende Funktion. Alle Namen müssen absolute ROS-Namen unter dem ausgewählten Roboter sein, z. B. `/mur620d/cmd_vel` mit `geometry_msgs/msg/Twist` für die MiR-Basis oder `/mur620d/mobile_base_controller/cmd_vel` (TwistStamped) für die Simulation. Die GUI prüft den konfigurierten Namen, Nachrichtentyp und passenden Subscriber vor dem Senden. Bei Verlust des MiR-Endpunkts wird die Jog-Freigabe aufgehoben. Nach einem Profilwechsel muss erneut freigegeben werden.
+
+Für Navigation bezeichnet das Goal-Feld im Simulationsmodus die Nav2-Action `NavigateToPose` und das Pose-Feld eine `PoseStamped`-Quelle. Im Hardwaremodus bezeichnet Goal einen `PoseStamped`-Empfänger, Cancel einen `actionlib_msgs/msg/GoalID`-Empfänger und Pose eine `geometry_msgs/msg/Pose`-Quelle. Diese Zuordnung gehört zum jeweiligen Modus; nach einem Moduswechsel müssen die Navigationsendpunkte erneut bestätigt werden. Endpunkte werden im Preset gespeichert und in portable Presets exportiert. Bestehende Presets ohne diese Felder starten mit deaktivierten Funktionen und müssen eingerichtet werden.

@@ -34,12 +34,18 @@ def configure_gui_icon(app: QtWidgets.QApplication, name: str) -> QtGui.QIcon:
                 app.setWindowIcon(icon)
                 return icon
 
-    source_icon = Path(__file__).resolve().parents[1] / 'assets/icons' / (name + '.svg')
-    if source_icon.is_file():
-        icon = QtGui.QIcon(str(source_icon))
-        if not icon.isNull():
-            app.setWindowIcon(icon)
-            return icon
+    candidates = [Path(__file__).resolve().parents[1] / 'assets/icons' / (name + '.svg')]
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        candidates.append(Path(get_package_share_directory('match_mur_gui')) / 'assets/icons' / (name + '.svg'))
+    except (ImportError, LookupError):
+        pass
+    for source_icon in candidates:
+        if source_icon.is_file():
+            icon = QtGui.QIcon(str(source_icon))
+            if not icon.isNull():
+                app.setWindowIcon(icon)
+                return icon
 
     icon = QtGui.QIcon.fromTheme(name)
     if not icon.isNull():

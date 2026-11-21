@@ -1,0 +1,79 @@
+name: Ubuntu 24.04 ROS 2 Jazzy deb
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout MiR service definitions
+        uses: actions/checkout@v4
+        with:
+          repository: match-ROS/match_mobile_robotics_jazzy
+          ref: main
+          path: src/match_mobile_robotics_jazzy
+      - name: Initialize Ewellix interface sources
+        run: git -C src/match_mobile_robotics_jazzy submodule update --init -- ewellix/ewellix_lift_common
+      - uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: jazzy
+      - name: Install build tools and ROS dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-colcon-common-extensions python3-rosdep dpkg-dev qmlscene ros-jazzy-ur-dashboard-msgs
+          rosdep update
+          rosdep install --from-paths . src/match_mobile_robotics_jazzy/mir_robot/mir_srvs \
+            src/match_mobile_robotics_jazzy/ewellix/ewellix_lift_common/ewellix_interfaces \
+            src/match_mobile_robotics_jazzy/mur_robot/mur_control \
+            --ignore-src --rosdistro jazzy -r -y --skip-keys qmlscene
+      - name: Build package
+        run: >-
+          colcon build --merge-install --install-base build/install
+          --base-paths . src/match_mobile_robotics_jazzy/mir_robot/mir_srvs
+          src/match_mobile_robotics_jazzy/ewellix/ewellix_lift_common/ewellix_interfaces
+          src/match_mobile_robotics_jazzy/mur_robot/mur_control
+          --packages-up-to match_mur_gui
+      - name: Assemble Debian package
+        shell: bash
+        run: |
+          version="$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("package.xml").getroot().findtext("version"))')"
+          revision="${GITHUB_SHA:0:12}"
+          python3 scripts/package_deb.py \
+            --install-root build/install \
+            --output "dist/match-mur-gui_${version}+git.${revision}_amd64.deb" \
+            --version "${version}+git.${revision}"
+      - name: Smoke-test extracted package
+        shell: bash
+        run: |
+          dpkg-deb -x dist/*.deb "$RUNNER_TEMP/mur-deb"
+          source /opt/ros/jazzy/setup.bash
+          export PYTHONPATH="$RUNNER_TEMP/mur-deb/usr/lib/python3/dist-packages:${PYTHONPATH:-}"
+          export LD_LIBRARY_PATH="$RUNNER_TEMP/mur-deb/usr/lib:${LD_LIBRARY_PATH:-}"
+          export AMENT_PREFIX_PATH="$RUNNER_TEMP/mur-deb/usr:${AMENT_PREFIX_PATH:-}"
+          export QT_QPA_PLATFORM=offscreen
+          cd "$RUNNER_TEMP"
+          /usr/bin/python3 - <<'PYTEST'
+          from ewellix_interfaces.msg import Command
+          from mir_srvs.srv import ColorRGB
+          from mur_control.action import JparseMove
+          from ur_dashboard_msgs.srv import IsProgramRunning
+          from PyQt5.QtWidgets import QApplication
+          from match_mur_gui.app_icon import configure_gui_icon
+          for cls in (Command, ColorRGB, JparseMove, IsProgramRunning):
+              cls.__class__.__import_type_support__()
+              assert cls._TYPE_SUPPORT
+          app = QApplication([])
+          for name in ('mur-base-gui', 'mur-mocap-gui', 'mur-cooperative-gui', 'mur-oak-gui', 'mur-navigation-gui'):
+              assert not configure_gui_icon(app, name).isNull(), name
+          PYTEST
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: match-mur-gui-ubuntu-24.04-ros-jazzy
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 30

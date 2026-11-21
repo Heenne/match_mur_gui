@@ -80,7 +80,9 @@ Rectangle {
                         onActivated: root.saveOption("localization_source", model[currentIndex].value)
                     }
                     Label { text: root.workflow.localizationState; color: "#f0b44d" }
+                    Button { text: "Prepare AMCL"; enabled: !root.workflow.busy && root.workflow.options.localization_source === "amcl" && root.sessionController.connectionState === "Connected"; onClicked: root.workflow.prepareAmcl() }
                 }
+                Label { Layout.fillWidth: true; text: "Active localization: " + root.workflow.activeLocalization; color: "#dce6eb"; wrapMode: Text.WordWrap }
                 Label { Layout.fillWidth: true; text: root.workflow.localizationDetail; color: "#a8bac5"; wrapMode: Text.WordWrap }
                 RowLayout {
                     Label { text: "MoveIt speed: " + root.workflow.options.moveit_speed_percent + "%"; color: "#dce6eb" }

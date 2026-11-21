@@ -8,6 +8,11 @@ from match_mur_gui import base_gui
 from test_gui_layout import _RosWorker
 
 
+@pytest.fixture(autouse=True)
+def isolated_settings(monkeypatch, tmp_path):
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'config'))
+
+
 @pytest.mark.parametrize('source', ['mir', 'mocap', 'amcl'])
 def test_source_is_forwarded_at_hardware_start(monkeypatch, tmp_path, source):
     monkeypatch.setattr(base_gui, 'RosWorker', _RosWorker)

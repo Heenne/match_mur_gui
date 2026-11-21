@@ -8,7 +8,7 @@ Rectangle {
     ColumnLayout {
         anchors.fill: parent; anchors.margins: 18; spacing: 8
         Label { text: "Controlled UR shutdown"; color: "#f2f6f8"; font.pixelSize: 20; font.bold: true }
-        Label { Layout.fillWidth: true; text: "Separate from arm stop and process stop. This powers down the selected UR control boxes; no parking pose is performed."; color: "#f0b44d"; wrapMode: Text.WordWrap }
+        Label { Layout.fillWidth: true; text: "Separate from arm stop and process stop. This powers down the selected UR control boxes; no parking pose is performed. Motion remains locked for these arms until the app is restarted."; color: "#f0b44d"; wrapMode: Text.WordWrap }
         RowLayout {
             CheckBox { id: left; text: "UR10_l"; checked: controller && controller.leftSelected; enabled: controller && !controller.busy; onClicked: controller.setSelected("l", checked) }
             CheckBox { id: right; text: "UR10_r"; checked: controller && controller.rightSelected; enabled: controller && !controller.busy; onClicked: controller.setSelected("r", checked) }

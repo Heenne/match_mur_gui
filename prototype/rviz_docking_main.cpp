@@ -2114,6 +2114,40 @@ bool run_connection_error_layout_contract_test(const QString & qml_path, const Q
       qCritical("The Mocap control cannot be reached by scrolling");
       return false;
     }
+
+    // Exercise the Processes page after a launch emits a large burst of output.
+    session->selectView("Processes");
+    auto * processes = qobject_cast<ProcessManager *>(
+      view->rootContext()->contextProperty("processes").value<QObject *>());
+    const QString latest = "log-burst-latest-line";
+    const QString output = (QString("log-burst-early-line ") + QString(400, 'x') + '\n').repeated(80) +
+      latest + '\n';
+    QFile fixture_log(directory.filePath("log-burst.txt"));
+    if (!fixture_log.open(QIODevice::WriteOnly) || fixture_log.write(output.toUtf8()) < 0) return false;
+    fixture_log.close();
+    if (!processes || !processes->startProcess("Log burst", "/usr/bin/cat", {fixture_log.fileName()})) return false;
+    QElapsedTimer log_timeout;
+    log_timeout.start();
+    while (!processes->log().contains(latest) && log_timeout.elapsed() < 3000) {
+      QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+    QCoreApplication::processEvents();
+    auto * preview = find_item(find_item, view->rootObject(), [&](auto * item) {
+      return item->isVisible() && item->property("text").toString().contains(latest);
+    });
+    if (!preview) {
+      qCritical("The latest process output is missing from the Processes page");
+      return false;
+    }
+    auto * overflow = find_item(find_item, view->rootObject(), [&](auto * item) {
+      return item->isVisible() && item->property("text").toString().contains(latest) &&
+        !item->clip() && item->property("contentHeight").toReal() > item->height() + 1;
+    });
+    if (overflow) {
+      qCritical("Process output overflows its text area (%g px of text in %g px)",
+        overflow->property("contentHeight").toReal(), overflow->height());
+      return false;
+    }
   }
   session->selectView("Settings");
   auto * edit = reach_button("Edit profile");

@@ -200,23 +200,22 @@ Item {
                         anchors.fill: parent
                         implicitHeight: diagnosisLayout.implicitHeight + 36
                         color: "#1b2933"; radius: 12; border.color: "#2b3c47"
-                        ColumnLayout {
+                        Column {
                             id: diagnosisLayout
-                            anchors.fill: parent; anchors.margins: 18; spacing: 12
+                            anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+                            anchors.margins: 18; spacing: 12
                             Label { text: "ROS graph diagnosis"; color: window.foreground; font.pixelSize: 20; font.bold: true }
-                            Label { text: session.target + " · ROS domain " + session.rosDomain + " · " + session.robot + " · " + window.connectionStatus; color: window.muted }
+                            Label { width: parent.width; text: session.target + " · ROS domain " + session.rosDomain + " · " + session.robot + " · " + window.connectionStatus; color: window.muted; wrapMode: Text.WrapAnywhere }
                             Repeater {
                                 model: session.diagnostics
                                 delegate: Label {
                                     required property string modelData
-                                    Layout.fillWidth: true
-                                    Layout.minimumWidth: 0
+                                    width: parent.width
                                     text: modelData; color: window.foreground
                                     wrapMode: Text.WrapAnywhere; font.pixelSize: 14
                                     Accessible.name: modelData
                                 }
                             }
-                            Item { Layout.fillHeight: true }
                         }
                     }
                 }

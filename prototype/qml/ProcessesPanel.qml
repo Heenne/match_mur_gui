@@ -30,6 +30,10 @@ Rectangle {
     function currentContext() {
         return JSON.stringify([session.preset, session.mode, session.target, session.rosDomain, session.robot])
     }
+    function recentLogLines(output) {
+        const tail = output.slice(-2400).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").trim()
+        return tail.length ? tail.split(/[\r\n]+/).slice(-3) : []
+    }
     function gazeboStatusText() {
         if (gazeboServerReady) return "Gazebo server available · world view can be opened"
         if (autoOpenTimedOut) return "No Gazebo server detected within 60 seconds. Check the simulation log."
@@ -81,6 +85,7 @@ Rectangle {
                 }
             }
             Button { text: "Stop app-owned processes"; onClicked: { root.waitingForSimulationServer = false; root.processManager.stopAll() } }
+            Button { text: "Open session log"; onClicked: { logs.showSource("All logs"); logs.raiseDock() } }
         }
         Label {
             Layout.fillWidth: true
@@ -114,21 +119,28 @@ Rectangle {
         }
         Rectangle { Layout.fillWidth: true; height: 1; color: "#354752" }
         ScrollView {
+            id: processList
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.minimumHeight: 160
+            Layout.preferredHeight: 160
+            contentWidth: availableWidth
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
             clip: true
             Column {
-                width: parent.width
+                width: processList.availableWidth
                 spacing: 10
                 Repeater {
                     model: root.processManager.processes
                     delegate: Rectangle {
+                        id: processCard
                         required property var modelData
+                        readonly property var recentLines: root.recentLogLines(modelData.log)
                         width: parent.width
                         implicitHeight: processColumn.implicitHeight + 20
                         color: "#14212a"
                         radius: 8
+                        clip: true
                         ColumnLayout {
                             id: processColumn
                             anchors.fill: parent
@@ -145,27 +157,37 @@ Rectangle {
                                 Button { text: "Stop"; enabled: modelData.state === "Running" || modelData.state === "Starting" || modelData.state === "Connecting" || modelData.state === "Stop failed" || modelData.state === "Stop unconfirmed"; onClicked: root.processManager.stopProcess(modelData.name) }
                                 Button { text: "Open log"; onClicked: { logs.showSource(root.processManager.logSource(modelData.name)); logs.raiseDock() } }
                             }
-                            TextArea {
+                            Rectangle {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 92
-                                readOnly: true
-                                text: modelData.log
-                                color: "#c9d6dc"
-                                background: Rectangle { color: "#101820"; radius: 4 }
-                                wrapMode: TextEdit.Wrap
+                                implicitHeight: logLines.implicitHeight + 16
+                                visible: processCard.recentLines.length > 0
+                                color: "#101820"
+                                radius: 4
+                                clip: true
+                                ColumnLayout {
+                                    id: logLines
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+                                    spacing: 2
+                                    Repeater {
+                                        model: processCard.recentLines
+                                        delegate: Label {
+                                            required property string modelData
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: 0
+                                            text: modelData
+                                            textFormat: Text.PlainText
+                                            elide: Text.ElideRight
+                                            font.family: "monospace"
+                                            color: "#c9d6dc"
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-        Label {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 100
-            text: root.processManager.log
-            color: "#a8bac5"
-            wrapMode: Text.Wrap
-            elide: Text.ElideLeft
         }
     }
 }

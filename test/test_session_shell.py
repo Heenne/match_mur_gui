@@ -80,14 +80,29 @@ def test_portable_presets_round_trip_and_remap_machine_paths(tmp_path):
 def test_rviz_uses_active_profile_config_and_time_source(tmp_path):
     executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
     environment = os.environ.copy()
-    environment["MUR_COMMAND_CENTER_SETTINGS"] = str(tmp_path / "session.ini")
+    environment.pop("MUR_COMMAND_CENTER_SETTINGS", None)
+    environment["XDG_CONFIG_HOME"] = str(tmp_path)
     environment["QT_QPA_PLATFORM"] = "offscreen"
+    user_settings = tmp_path / "MATCH/MuRCommandCenter.ini"
+    user_settings.parent.mkdir()
+    user_settings.write_text("[General]\nactivePreset=Operator profile\n")
     result = subprocess.run(
         [str(executable), "--contract-test-rviz-session"],
         env=environment, text=True, capture_output=True, timeout=10,
     )
     assert result.returncode == 0, result.stderr
     assert "RViz session contract passed" in result.stderr + result.stdout
+    assert user_settings.read_text() == "[General]\nactivePreset=Operator profile\n"
+
+
+def test_missing_rviz_file_leaves_navigation_reachable():
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    environment = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software")
+    result = subprocess.run(
+        [str(executable), "--contract-test-connection-error-layout"],
+        env=environment, text=True, capture_output=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_settings_exposes_profile_edit_and_portable_file_dialogs():

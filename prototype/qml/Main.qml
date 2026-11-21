@@ -13,6 +13,8 @@ Item {
     property var pages: ["Overview", "Visualization", "Robot", "Processes", "Diagnosis", "Logs", "Settings", "Mocap"]
     property color muted: "#a8bac5"
     property color foreground: "#f2f6f8"
+    readonly property bool connectionFailed: session.connectionState.indexOf("Failed") === 0
+    readonly property string connectionStatus: connectionFailed ? "Failed" : session.connectionState
 
     function statusColor(status) {
         if (status === "Disconnected") return "#f0b44d"
@@ -54,10 +56,11 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             ColumnLayout {
-                Label { text: "MuR Command Center"; color: window.foreground; font.pixelSize: 25; font.bold: true }
-                Label { text: session.mode + " · " + session.preset + " · " + session.target + " · domain " + session.rosDomain + " · " + session.robot; color: window.muted }
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                Label { Layout.fillWidth: true; text: "MuR Command Center"; color: window.foreground; font.pixelSize: 25; font.bold: true; elide: Text.ElideRight }
+                Label { Layout.fillWidth: true; text: session.mode + " · " + session.preset + " · " + session.target + " · domain " + session.rosDomain + " · " + session.robot; color: window.muted; elide: Text.ElideRight }
             }
-            Item { Layout.fillWidth: true }
             ComboBox { model: ["Simulation", "Hardware"]; currentIndex: model.indexOf(session.mode); onActivated: session.selectMode(currentText) }
             ComboBox { model: session.presets; currentIndex: model.indexOf(session.preset); onActivated: session.selectPreset(currentText) }
             Button { text: "New preset"; onClicked: presetDialog.open() }
@@ -76,20 +79,45 @@ Item {
             }
             ComboBox { model: ["mur620d", "mur620b", "mur620c"]; currentIndex: model.indexOf(session.robot); onActivated: session.selectRobot(currentText) }
         }
+        Flow {
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            spacing: 6
+            Repeater {
+                model: window.pages
+                Button {
+                    required property string modelData
+                    width: Math.max(74, implicitContentWidth + leftPadding + rightPadding)
+                    text: modelData
+                    checkable: true
+                    checked: session.view === modelData
+                    onClicked: selectPage(modelData)
+                }
+            }
+        }
         RowLayout {
             Layout.fillWidth: true
             StatusPill { label: session.mode }
-            StatusPill { label: session.connectionState }
+            StatusPill { label: window.connectionStatus }
             Button { text: session.connectionState === "Connected" ? "Disconnect" : "Connect"; enabled: session.connectionState !== "Connecting"; onClicked: session.connectionState === "Connected" ? session.disconnectFromTarget() : session.connectToTarget() }
-            Label { text: session.connectionState + " · existing processes are not managed"; color: window.muted }
             Item { Layout.fillWidth: true }
-            Repeater {
-                model: window.pages
-                Button { required property string modelData; text: modelData; checkable: true; checked: session.view === modelData; onClicked: selectPage(modelData) }
-            }
+        }
+        Label {
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            visible: window.connectionFailed
+            text: session.connectionState
+            textFormat: Text.PlainText
+            wrapMode: Text.WrapAnywhere
+            maximumLineCount: 3
+            elide: Text.ElideRight
+            color: "#ff9b8e"
+            Accessible.name: text
         }
         StackLayout {
             Layout.fillWidth: true; Layout.fillHeight: true
+            Layout.minimumWidth: 0
+            Layout.minimumHeight: 0
             currentIndex: Math.max(0, window.pages.indexOf(session.view))
             Rectangle {
                 color: "#1b2933"; radius: 12; border.color: "#2b3c47"
@@ -97,7 +125,7 @@ Item {
                     anchors.fill: parent; anchors.margins: 18; spacing: 12
                     Label { text: "Overview"; color: window.foreground; font.pixelSize: 20; font.bold: true }
                     Label { text: session.mode + " · " + session.preset + " · " + session.target + " · domain " + session.rosDomain + " · " + session.robot; color: window.muted }
-                    Label { text: "Connection: " + session.connectionState; color: window.foreground }
+                    Label { text: "Connection: " + window.connectionStatus; color: window.foreground }
                     Label { text: "Managed processes"; color: window.foreground; font.bold: true }
                     Label { visible: processes.processes.length === 0; text: "No managed processes"; color: window.muted }
                     Repeater {
@@ -144,7 +172,7 @@ Item {
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 18; spacing: 12
                     Label { text: "ROS graph diagnosis"; color: window.foreground; font.pixelSize: 20; font.bold: true }
-                    Label { text: session.target + " · ROS domain " + session.rosDomain + " · " + session.robot + " · " + session.connectionState; color: window.muted }
+                    Label { text: session.target + " · ROS domain " + session.rosDomain + " · " + session.robot + " · " + window.connectionStatus; color: window.muted }
                     ScrollView {
                         Layout.fillWidth: true; Layout.fillHeight: true
                         clip: true
@@ -188,7 +216,6 @@ Item {
             }
             Panels.MocapPanel { controller: mocap; sessionController: session }
         }
-        Label { text: session.connectionState + " · " + session.target; color: window.statusColor(session.connectionState); Accessible.name: text }
     }
     Dialog {
         id: presetDialog; title: "Create preset"; modal: true; standardButtons: Dialog.Ok | Dialog.Cancel

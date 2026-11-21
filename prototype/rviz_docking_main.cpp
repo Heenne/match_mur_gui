@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QMainWindow>
 #include <QQmlContext>
+#include <QQuickItem>
 #include <QQuickWidget>
 #include <QShortcut>
 #include <QSettings>
@@ -508,7 +509,7 @@ public slots:
   }
   void selectView(const QString &view)
   {
-    static const QStringList valid = {"Overview", "Visualization", "Robot", "Processes", "Diagnosis", "Logs", "Settings"};
+    static const QStringList valid = {"Overview", "Visualization", "Robot", "Processes", "Diagnosis", "Logs", "Settings", "Mocap"};
     if (valid.contains(view)) setValue("view", view);
   }
   void connectToTarget() { if (connection_state_ == "Disconnected" || connection_state_.startsWith("Failed")) emit connectRequested(); }
@@ -1946,6 +1947,58 @@ private:
   QTimer ros_spin_timer_;
   QTimer diagnosis_timer_;
 };
+
+bool run_connection_error_layout_contract_test(const QString & qml_path)
+{
+  QTemporaryDir directory;
+  if (!directory.isValid()) return false;
+  const auto missing_config = directory.filePath(QString(190, 'x') + ".rviz");
+  SessionController fixture;
+  if (!fixture.saveProfile("Missing RViz file", "Simulation", "localhost", "mur620d", "RViz",
+    "", missing_config, 62)) return false;
+
+  PrototypeWindow window("", "Layout check", qml_path);
+  window.show();
+  auto * view = qobject_cast<QQuickWidget *>(window.centralWidget());
+  if (!view || !view->rootObject()) return false;
+  auto * session = qobject_cast<SessionController *>(view->rootContext()->contextProperty("session").value<QObject *>());
+  if (!session) return false;
+  const QStringList pages{"Overview", "Visualization", "Robot", "Processes", "Diagnosis", "Logs", "Settings", "Mocap"};
+  const auto find_button = [](auto & self, QQuickItem * item, const QString & text) -> QQuickItem * {
+    if (item->property("checkable").toBool() && item->property("text").toString() == text) return item;
+    for (auto * child : item->childItems()) {
+      if (auto * button = self(self, child, text)) return button;
+    }
+    return nullptr;
+  };
+  const auto navigation_fits = [&]() {
+    auto * root = view->rootObject();
+    for (const auto & page : pages) {
+      auto * button = find_button(find_button, root, page);
+      if (!button || !button->isVisible() || !button->isEnabled() ||
+        !root->boundingRect().contains(button->mapRectToItem(root, button->boundingRect()))) {
+        qCritical("Navigation button '%s' is outside the visible window", qPrintable(page));
+        return false;
+      }
+    }
+    return true;
+  };
+  QCoreApplication::processEvents();
+  if (!navigation_fits()) return false;
+  session->connectToTarget();
+  if (!session->connectionState().startsWith("Failed:") ||
+    !session->connectionState().contains(missing_config) || rclcpp::ok()) return false;
+  QCoreApplication::processEvents();
+  if (!navigation_fits()) return false;
+  window.resize(840, 560);
+  QCoreApplication::processEvents();
+  if (!navigation_fits()) return false;
+  for (const auto & page : pages) {
+    auto * button = find_button(find_button, view->rootObject(), page);
+    if (!QMetaObject::invokeMethod(button, "clicked") || session->view() != page) return false;
+  }
+  return true;
+}
 }
 
 int main(int argc, char ** argv)
@@ -1983,6 +2036,8 @@ int main(int argc, char ** argv)
       // Verifies the persistent per-profile Gazebo auto-open preference.
     } else if (arguments[i] == "--contract-test-rviz-session") {
       // Checks active-profile RViz selection, time source, and unavailable profile errors.
+    } else if (arguments[i] == "--contract-test-connection-error-layout") {
+      // Checks that a failed Connect leaves the navigation reachable.
     } else if (arguments[i] == "--contract-test-sim-base-jog") {
       // Exercises hold-to-run behavior against an isolated fake ROS adapter.
     } else if (arguments[i] == "--contract-test-mir-hardware-control") {
@@ -2039,6 +2094,16 @@ int main(int argc, char ** argv)
 
   app.setOrganizationName("MATCH");
   app.setApplicationName("MuRCommandCenter");
+  std::unique_ptr<QTemporaryDir> contract_config;
+  if (!arguments.filter(QRegularExpression("^--contract-test-")).isEmpty()) {
+    contract_config = std::make_unique<QTemporaryDir>();
+    if (!contract_config->isValid() ||
+      !qputenv("XDG_CONFIG_HOME", contract_config->path().toLocal8Bit()) ||
+      !qputenv("MUR_COMMAND_CENTER_SETTINGS", contract_config->filePath("session.ini").toLocal8Bit())) {
+      qCritical("Could not isolate command center contract test settings");
+      return 1;
+    }
+  }
   if (arguments.contains("--contract-test-session")) {
     if (!run_session_contract_test()) {
       qCritical("Session contract failed");
@@ -2113,6 +2178,9 @@ int main(int argc, char ** argv)
     }
     qInfo("RViz session contract passed");
     return 0;
+  }
+  if (arguments.contains("--contract-test-connection-error-layout")) {
+    return run_connection_error_layout_contract_test(qml_path) ? 0 : 1;
   }
   if (arguments.contains("--contract-test-sim-base-jog")) {
     if (!run_sim_base_jog_contract_test()) {

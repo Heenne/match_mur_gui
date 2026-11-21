@@ -95,6 +95,7 @@ def test_remote_simulation_uses_selected_host_and_stops_only_its_owned_run(tmp_p
     assert args_file.exists() and "sim-host" in args_file.read_text()
     assert "ros2 launch mur_launch_sim" in args_file.read_text()
     assert "start_mur620_hardware_logged.sh" in args_file.read_text()
+    assert "mir_localization_source:=mocap" in args_file.read_text()
     assert "CLEAN_START=false" in args_file.read_text()
     assert "BUILD_BEFORE_LAUNCH=false" in args_file.read_text()
     assert "${HOME}/colcon_ws" in args_file.read_text()

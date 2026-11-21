@@ -30,6 +30,7 @@ struct HardwareStartConfig
   bool zero_admittance{false};
   bool launch_moveit{true};
   int moveit_speed_percent{20};
+  QString localization_source{"mir"};
 };
 struct HardwareArmCheck
 {
@@ -91,6 +92,8 @@ class HardwareStartController : public QObject
   Q_PROPERTY(QString state READ state NOTIFY changed)
   Q_PROPERTY(QString message READ message NOTIFY changed)
   Q_PROPERTY(QVariantMap options READ options NOTIFY changed)
+  Q_PROPERTY(QString localizationState READ localizationState NOTIFY changed)
+  Q_PROPERTY(QString localizationDetail READ localizationDetail NOTIFY changed)
   Q_PROPERTY(bool preflightReady READ preflightReady NOTIFY changed)
   Q_PROPERTY(bool busy READ busy NOTIFY changed)
 
@@ -101,6 +104,8 @@ public:
   QString state() const { return state_; }
   QString message() const { return message_; }
   QVariantMap options() const { return options_; }
+  QString localizationState() const;
+  QString localizationDetail() const;
   bool preflightReady() const { return preflight_ready_; }
   bool busy() const { return busy_; }
 
@@ -109,6 +114,8 @@ public:
     const QString & connection_state, const QString & local_workspace,
     const QString & remote_workspace);
   Q_INVOKABLE void setOption(const QString & name, const QVariant & value);
+  Q_INVOKABLE void setLocalizationStatus(const QString & source, const QString & state,
+    const QString & detail);
   Q_INVOKABLE void runPreflight();
   Q_INVOKABLE void startHardware();
   Q_INVOKABLE void syncSource();
@@ -136,6 +143,7 @@ private:
   QString local_workspace_;
   QString remote_workspace_;
   QVariantMap options_;
+  QMap<QString, QVariantMap> localization_statuses_;
   QVariantList checks_;
   QString state_{"Idle"};
   QString message_{"Connect to the selected hardware target, then run preflight."};

@@ -37,7 +37,6 @@
   <exec_depend>qml-module-qtquick-controls2</exec_depend>
   <exec_depend>qml-module-qtquick-dialogs</exec_depend>
   <exec_depend>qml-module-qtquick-layouts</exec_depend>
-  <exec_depend>qmlscene</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>

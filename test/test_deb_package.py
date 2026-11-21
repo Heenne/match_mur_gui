@@ -20,6 +20,10 @@ def test_deb_has_menu_entry_icon_launcher_and_ros_dependencies(tmp_path):
     python_package.mkdir(parents=True)
     share.mkdir(parents=True)
     (lib / 'general_mur_gui.py').write_text('#!/usr/bin/env python3\n')
+    (lib / 'mur_command_center').write_text('#!/bin/sh\n')
+    qml = share / 'command_center/qml'
+    qml.mkdir(parents=True)
+    (qml / 'Main.qml').write_text('import QtQuick 2.12\nItem {}\n')
     (python_package / '__init__.py').write_text('')
     (share / 'package.xml').write_text((ROOT / 'package.xml').read_text())
     for name in sorted(PACKAGE.BUNDLED_ROS_PACKAGES):
@@ -50,6 +54,11 @@ def test_deb_has_menu_entry_icon_launcher_and_ros_dependencies(tmp_path):
     assert './usr/share/applications/mur-base-gui.desktop' in contents
     assert './usr/share/icons/hicolor/128x128/apps/mur-base-gui.png' in contents
     assert './usr/lib/match_mur_gui/general_mur_gui.py' in contents
+    assert './usr/bin/mur-command-center' in contents
+    assert './usr/share/applications/mur-command-center.desktop' in contents
+    assert './usr/share/icons/hicolor/128x128/apps/mur-command-center.png' in contents
+    assert './usr/lib/match_mur_gui/mur_command_center' in contents
+    assert './usr/share/match_mur_gui/command_center/qml/Main.qml' in contents
     assert './usr/lib/python3/dist-packages/match_mur_gui/__init__.py' in contents
     for library in PACKAGE.MIR_SRVS_LIBRARIES:
         assert f'./usr/lib/{library}' in contents
@@ -85,6 +94,11 @@ def test_deb_has_menu_entry_icon_launcher_and_ros_dependencies(tmp_path):
     assert 'Name=MuR Basis-GUI' in desktop
     assert 'Exec=/usr/bin/mur-base-gui' in desktop
     assert 'Icon=mur-base-gui' in desktop
+    command_center_launcher = (extracted / 'usr/bin/mur-command-center').read_text()
+    assert 'exec ros2 run match_mur_gui mur_command_center "$@"' in command_center_launcher
+    command_center_desktop = (extracted / 'usr/share/applications/mur-command-center.desktop').read_text()
+    assert 'Name=MuR Command Center' in command_center_desktop
+    assert 'Exec=/usr/bin/mur-command-center' in command_center_desktop
 
 
 def test_deb_rejects_missing_staged_ros_package(tmp_path):

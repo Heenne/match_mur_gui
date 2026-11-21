@@ -7,7 +7,7 @@ from ament_index_python.packages import get_package_prefix
 
 
 def test_log_store_keeps_filters_independent_exports_views_and_redacts(tmp_path):
-    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_command_center"
     environment = os.environ.copy()
     environment["XDG_DATA_HOME"] = str(tmp_path / "data")
     environment["QT_QPA_PLATFORM"] = "offscreen"
@@ -21,10 +21,10 @@ def test_log_store_keeps_filters_independent_exports_views_and_redacts(tmp_path)
 
 def test_native_log_dock_exposes_source_tabs_filters_exports_and_process_jump():
     root = Path(__file__).resolve().parents[1]
-    host = (root / "prototype/rviz_docking_main.cpp").read_text()
-    panel = (root / "prototype/log_panel.cpp").read_text()
-    store = (root / "prototype/log_store.cpp").read_text()
-    processes = (root / "prototype/qml/ProcessesPanel.qml").read_text()
+    host = (root / "command_center/main.cpp").read_text()
+    panel = (root / "command_center/log_panel.cpp").read_text()
+    store = (root / "command_center/log_store.cpp").read_text()
+    processes = (root / "command_center/qml/ProcessesPanel.qml").read_text()
     assert '"ROS /rosout"' in store and '"All logs"' in store
     assert '"Export full recording…"' in panel and '"Export left filtered view…"' in panel
     assert "QDockWidget::DockWidgetFloatable" in host

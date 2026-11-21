@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from typing import NamedTuple
 import xml.etree.ElementTree as ET
 
 
@@ -24,11 +25,26 @@ NATIVE_DEPENDENCIES = {
     'libqt5gui5', 'libqt5network5', 'libqt5qml5', 'libqt5quick5',
     'libqt5quickwidgets5', 'libqt5widgets5', 'python3-pyqt5',
     'qml-module-qtquick-controls2', 'qml-module-qtquick-dialogs',
-    'qml-module-qtquick-layouts', 'qmlscene',
+    'qml-module-qtquick-layouts',
 }
-APP = ('mur-base-gui', 'MuR Basis-GUI', 'MuR-Roboter bedienen',
-       'match_mur_gui', 'general_mur_gui.py', 'MuR;Roboter;Basis;ROS;')
 MARKER = 'match_mur_gui/scripts/package_deb.py'
+
+
+class DesktopApp(NamedTuple):
+    slug: str
+    title: str
+    comment: str
+    executable: str
+    keywords: str
+    icon_source: str
+
+
+APPS = (
+    DesktopApp('mur-command-center', 'MuR Command Center', 'MuR-Simulation und -Hardware bedienen',
+               'mur_command_center', 'MuR;Simulation;Roboter;ROS;', 'mur-base-gui'),
+    DesktopApp('mur-base-gui', 'MuR Basis-GUI', 'MuR-Roboter bedienen',
+               'general_mur_gui.py', 'MuR;Roboter;Basis;ROS;', 'mur-base-gui'),
+)
 
 
 def runtime_dependencies(package_xml: Path, bundled_manifests: tuple[Path, ...] = ()) -> list[str]:
@@ -39,7 +55,7 @@ def runtime_dependencies(package_xml: Path, bundled_manifests: tuple[Path, ...] 
             key = (element.text or '').strip()
             if not key or key in BUNDLED_ROS_PACKAGES:
                 continue
-            if key.startswith(('python3-', 'qml-module-', 'lib')) or key == 'qmlscene':
+            if key.startswith(('python3-', 'qml-module-', 'lib')):
                 dependencies.add(key)
             else:
                 dependencies.add(ROS_DEPENDENCY_PREFIX + key.replace('_', '-'))
@@ -47,7 +63,7 @@ def runtime_dependencies(package_xml: Path, bundled_manifests: tuple[Path, ...] 
     return sorted(dependencies)
 
 
-def _launcher() -> bytes:
+def _launcher(executable: str) -> bytes:
     return ('''#!/usr/bin/env bash
 # Managed by match_mur_gui/scripts/package_deb.py
 set -e
@@ -62,23 +78,21 @@ export AMENT_PREFIX_PATH="/usr${AMENT_PREFIX_PATH:+:$AMENT_PREFIX_PATH}"
 export WS="${WS:-${XDG_DATA_HOME:-$HOME/.local/share}/match_mur_gui}"
 mkdir -p "$WS"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-62}"
-exec ros2 run match_mur_gui general_mur_gui.py "$@"
-''').encode()
+''' + f'exec ros2 run match_mur_gui {executable} "$@"\n').encode()
 
 
-def _desktop_entry() -> bytes:
-    slug, title, comment, _package, _executable, keywords = APP
+def _desktop_entry(app: DesktopApp) -> bytes:
     return (f'[Desktop Entry]\n'
             f'Type=Application\n'
-            f'Name={title}\n'
+            f'Name={app.title}\n'
             f'GenericName=Roboter-GUI\n'
-            f'Comment={comment}\n'
-            f'Exec=/usr/bin/{slug}\n'
-            f'Icon={slug}\n'
-            f'StartupWMClass={slug}\n'
+            f'Comment={app.comment}\n'
+            f'Exec=/usr/bin/{app.slug}\n'
+            f'Icon={app.slug}\n'
+            f'StartupWMClass={app.slug}\n'
             f'Terminal=false\n'
             f'Categories=Utility;\n'
-            f'Keywords={keywords}\n'
+            f'Keywords={app.keywords}\n'
             f'StartupNotify=true\n'
             f'X-MuR-Gui-Managed={MARKER}\n').encode('utf-8')
 
@@ -93,6 +107,8 @@ def build_deb(source: Path, install_root: Path, output: Path, *, version: str,
     if not package_lib.is_dir() or not package_share.is_dir() or python_site_packages is None:
         raise ValueError(f'Paketinstallation fehlt: {install_root} muss lib/{ROS_PACKAGE}, '
                          f'lib/python*/site-packages/{ROS_PACKAGE} und share/{ROS_PACKAGE} enthalten')
+    if not (package_lib / 'mur_command_center').is_file() or not (package_share / 'command_center/qml/Main.qml').is_file():
+        raise ValueError('MuR Command Center oder seine installierte QML-Oberfläche fehlt')
     if not re.fullmatch(r'[0-9][A-Za-z0-9.+:~\-]*', version):
         raise ValueError(f'Ungültige Debian-Version: {version}')
     if architecture is None:
@@ -138,21 +154,23 @@ def build_deb(source: Path, install_root: Path, output: Path, *, version: str,
         if not plugin.is_file() or not (install_root / 'lib/mur_control').is_dir():
             raise ValueError('mur_control Plugin oder Laufzeitprogramme fehlen')
         shutil.copy2(plugin, root / 'usr/lib' / plugin.name)
-        launcher = root / 'usr/bin' / APP[0]
-        launcher.parent.mkdir(parents=True, exist_ok=True)
-        launcher.write_bytes(_launcher())
-        launcher.chmod(0o755)
+        binaries = root / 'usr/bin'
+        binaries.mkdir(parents=True, exist_ok=True)
         applications = root / 'usr/share/applications'
         applications.mkdir(parents=True, exist_ok=True)
-        (applications / f'{APP[0]}.desktop').write_bytes(_desktop_entry())
-        for size, suffix in (('scalable', '.svg'), ('48x48', '.png'), ('128x128', '.png')):
-            src_suffix = '' if size == 'scalable' else '-' + size.split('x')[0]
-            icon_source = source / 'assets/icons' / f'{APP[0]}{src_suffix}{suffix}'
-            if icon_source.is_symlink() or not icon_source.is_file():
-                raise ValueError(f'Icon fehlt oder ist ein Symlink: {icon_source}')
-            icon_dir = root / 'usr/share/icons/hicolor' / size / 'apps'
-            icon_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(icon_source, icon_dir / f'{APP[0]}{suffix}')
+        for app in APPS:
+            launcher = binaries / app.slug
+            launcher.write_bytes(_launcher(app.executable))
+            launcher.chmod(0o755)
+            (applications / f'{app.slug}.desktop').write_bytes(_desktop_entry(app))
+            for size, suffix in (('scalable', '.svg'), ('48x48', '.png'), ('128x128', '.png')):
+                src_suffix = '' if size == 'scalable' else '-' + size.split('x')[0]
+                icon_source = source / 'assets/icons' / f'{app.icon_source}{src_suffix}{suffix}'
+                if icon_source.is_symlink() or not icon_source.is_file():
+                    raise ValueError(f'Icon fehlt oder ist ein Symlink: {icon_source}')
+                icon_dir = root / 'usr/share/icons/hicolor' / size / 'apps'
+                icon_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(icon_source, icon_dir / f'{app.slug}{suffix}')
 
         control = root / 'DEBIAN/control'
         control.parent.mkdir()
@@ -162,8 +180,8 @@ def build_deb(source: Path, install_root: Path, output: Path, *, version: str,
             f'Package: {PACKAGE}\nVersion: {version}\nArchitecture: {architecture}\n'
             'Maintainer: MuR GUI maintainers <rosmatch@match.uni-hannover.de>\n'
             'Section: science\nPriority: optional\n'
-            'Description: MuR robot control desktop GUI for ROS 2 Jazzy\n'
-            ' Desktop launcher for the MuR robot control GUI.\n'
+            'Description: MuR Command Center for ROS 2 Jazzy\n'
+            ' Desktop applications for MuR simulation and hardware.\n'
             f'Depends: {depends}\n', encoding='utf-8')
         subprocess.run(['dpkg-deb', '--build', '--root-owner-group', str(root), str(output)],
                        check=True)

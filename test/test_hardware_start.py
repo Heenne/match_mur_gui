@@ -22,7 +22,7 @@ def test_preflight_uses_target_workspace_and_blocks_unknown_arm_state(tmp_path):
         "print('MUR_HOST_CHECK: status=ok issue=ur_dashboard_state host=UR10_l', flush=True)\n"
     )
     fake_ssh.chmod(0o755)
-    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_command_center"
     environment = os.environ.copy()
     environment.update({
         "MUR_FAKE_HARDWARE_SSH": str(fake_ssh),

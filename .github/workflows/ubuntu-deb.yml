@@ -24,12 +24,12 @@ jobs:
       - name: Install build tools and ROS dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-colcon-common-extensions python3-rosdep dpkg-dev qmlscene ros-jazzy-ur-dashboard-msgs
+          sudo apt-get install -y python3-colcon-common-extensions python3-rosdep dpkg-dev ros-jazzy-ur-dashboard-msgs
           rosdep update
           rosdep install --from-paths . src/match_mobile_robotics_jazzy/mir_robot/mir_srvs \
             src/match_mobile_robotics_jazzy/ewellix/ewellix_lift_common/ewellix_interfaces \
             src/match_mobile_robotics_jazzy/mur_robot/mur_control \
-            --ignore-src --rosdistro jazzy -r -y --skip-keys qmlscene
+            --ignore-src --rosdistro jazzy -r -y
       - name: Build package
         run: >-
           colcon build --merge-install --install-base build/install
@@ -70,6 +70,7 @@ jobs:
           for name in ('mur-base-gui', 'mur-mocap-gui', 'mur-cooperative-gui', 'mur-oak-gui', 'mur-navigation-gui'):
               assert not configure_gui_icon(app, name).isNull(), name
           PYTEST
+          ros2 run match_mur_gui mur_command_center --contract-test-session
       - name: Upload Debian package
         uses: actions/upload-artifact@v4
         with:

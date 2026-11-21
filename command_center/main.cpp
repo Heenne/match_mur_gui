@@ -1514,10 +1514,10 @@ QScrollArea * dock_viewport(QWidget * content)
   return viewport;
 }
 
-class PrototypeWindow : public QMainWindow
+class CommandCenterWindow : public QMainWindow
 {
 public:
-  PrototypeWindow(const QString & config_path, const QString & context, const QString & qml_path,
+  CommandCenterWindow(const QString & config_path, const QString & context, const QString & qml_path,
     const QSize & desktop_size)
   : QMainWindow(), context_(context), config_override_(config_path), session_(new SessionController()),
     sim_base_jog_adapter_(std::make_shared<RosSimBaseJogAdapter>()),
@@ -1628,9 +1628,9 @@ public:
     command_center->rootContext()->setContextProperty("logs", log_panel_);
     command_center->setSource(QUrl::fromLocalFile(qml_path));
     setCentralWidget(command_center);
-    connect(&ros_spin_timer_, &QTimer::timeout, this, &PrototypeWindow::spin_ros);
+    connect(&ros_spin_timer_, &QTimer::timeout, this, &CommandCenterWindow::spin_ros);
     ros_spin_timer_.setInterval(10);
-    connect(&diagnosis_timer_, &QTimer::timeout, this, &PrototypeWindow::refresh_diagnosis);
+    connect(&diagnosis_timer_, &QTimer::timeout, this, &CommandCenterWindow::refresh_diagnosis);
     connect(session_, &SessionController::connectRequested, this, [this]() { connect_ros(); });
     connect(session_, &SessionController::disconnectRequested, this, [this]() { disconnect_ros(); });
     for (int index = 0; index < 8; ++index) {
@@ -1817,7 +1817,7 @@ public:
       if (!rclcpp::ok()) rclcpp::init(0, nullptr);
       ros_executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
       rviz_node_ = std::make_shared<rviz_common::ros_integration::RosNodeAbstraction>(
-        "mur_rviz_docking_prototype");
+        "mur_command_center");
       rviz_node_->get_raw_node()->set_parameter(
         rclcpp::Parameter("use_sim_time", session_->useSimTime()));
       sim_base_jog_adapter_->setNode(rviz_node_->get_raw_node());
@@ -2000,7 +2000,7 @@ bool run_connection_error_layout_contract_test(const QString & qml_path, const Q
     "", missing_config, 62)) return false;
   fixture.selectView("Overview");
 
-  PrototypeWindow window("", "Layout check", qml_path, desktop_size);
+  CommandCenterWindow window("", "Layout check", qml_path, desktop_size);
   window.show();
   if (window.width() > desktop_size.width() || window.height() > desktop_size.height()) {
     qCritical("Startup window %dx%d exceeds desktop %dx%d", window.width(), window.height(),
@@ -2167,7 +2167,7 @@ bool run_connection_error_layout_contract_test(const QString & qml_path, const Q
 int main(int argc, char ** argv)
 {
   QApplication app(argc, argv);
-  app.setApplicationName("MuR RViz Docking Prototype");
+  app.setApplicationName("MuR Command Center");
 
   QString config_path;
   QString qml_path;
@@ -2228,7 +2228,7 @@ int main(int argc, char ** argv)
     } else if (arguments[i] == "--context" && i + 1 < arguments.size()) {
       context = arguments[++i];
     } else if (arguments[i] == "--help" || arguments[i] == "-h") {
-      qInfo("Usage: mur_rviz_docking_prototype [--config FILE.rviz] [--context LABEL] [--qml FILE.qml]");
+      qInfo("Usage: mur_command_center [--config FILE.rviz] [--context LABEL] [--qml FILE.qml]");
       return 0;
     } else {
       qCritical("Unknown or incomplete argument: %s", qPrintable(arguments[i]));
@@ -2245,7 +2245,7 @@ int main(int argc, char ** argv)
   if (qml_path.isEmpty()) {
     try {
       qml_path = QString::fromStdString(
-        ament_index_cpp::get_package_share_directory("match_mur_gui") + "/prototype/qml/Main.qml");
+        ament_index_cpp::get_package_share_directory("match_mur_gui") + "/command_center/qml/Main.qml");
     } catch (const std::exception &) {
       // Keep --qml available for local builds before the package is installed.
     }
@@ -2435,7 +2435,7 @@ int main(int argc, char ** argv)
   auto * screen = app.screenAt(QCursor::pos());
   if (!screen) screen = app.primaryScreen();
   const auto desktop = screen->availableGeometry();
-  PrototypeWindow window(config_path, context, qml_path, desktop.size());
+  CommandCenterWindow window(config_path, context, qml_path, desktop.size());
   window.move(desktop.center() - QPoint(window.width() / 2, window.height() / 2));
   window.show();
   const int result = app.exec();
@@ -2443,4 +2443,4 @@ int main(int argc, char ** argv)
   return result;
 }
 
-#include "rviz_docking_main.moc"
+#include "main.moc"

@@ -28,7 +28,25 @@ Check that the printed path matches your actual workspace folder name. Update
 set `REMOTE_WS` or the GUI's Remote WS field to the path on the remote computer.
 
 
-Gemeinsame PyQt5-Basisoberfläche für die MuR-Roboter. Nach dem Build von ROS 2 Jazzy und dem Colcon-Workspace startet sie mit:
+## MuR Command Center starten
+
+Das MuR Command Center ist die Desktop-App für Simulation und Hardware. Der
+C++-Host und die QML-Ansichten liegen in `command_center/`.
+
+```bash
+cd "$WS"
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-up-to match_mur_gui
+source install/setup.bash
+ros2 run match_mur_gui mur_command_center
+```
+
+Einzelheiten zu Profilen, Prozessen und ROS-Anbindung stehen in der
+[Dokumentation zum Command Center](command_center/README.md).
+
+### Bestehende PyQt5-Basis-GUI
+
+Die PyQt5-Basisoberfläche ist weiterhin separat verfügbar:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -154,12 +172,13 @@ sudo apt install ./match-mur-gui_*.deb
 
 APT installiert die im Paket deklarierten ROS-, Qt- und QML-Laufzeitabhängigkeiten.
 Auf dem Rechner müssen die passenden ROS-2-Jazzy-Paketquellen eingerichtet
-sein. Danach erscheint **MuR Basis-GUI** in der Ubuntu-Anwendungssuche. Der
-Starteintrag lädt `/opt/ros/$ROS_DISTRO/setup.bash` (standardmäßig Jazzy) und
-startet die installierte GUI, ohne einen Quell-Workspace vorauszusetzen. Ohne
-gesetztes `WS` verwendet sie `$XDG_DATA_HOME/match_mur_gui` (sonst
-`~/.local/share/match_mur_gui`) für benutzerschreibbare GUI-Daten. Für
-Hardwarezugriff den Remote-Workspace im GUI-Feld **Remote WS** konfigurieren.
+sein. Danach erscheint **MuR Command Center** in der Ubuntu-Anwendungssuche.
+Der Starteintrag lädt `/opt/ros/$ROS_DISTRO/setup.bash` (standardmäßig Jazzy)
+und startet die installierte App ohne Quell-Workspace. ROS-Pakete für die
+Simulation und projektspezifische RViz-Konfigurationen kommen aus dem
+jeweiligen Robotik-Workspace. Die bisherige **MuR Basis-GUI** hat weiterhin
+ihren eigenen Menüeintrag. Ohne gesetztes `WS` verwendet deren Starter
+`$XDG_DATA_HOME/match_mur_gui` (sonst `~/.local/share/match_mur_gui`).
 
 Alle GUIs mit der gemeinsamen MuR-Basis konfigurieren vor dem ROS-Start automatisch
 direkte DDS-Peers für die per SSH erreichbaren Hostnamen `mur620a` bis `mur620d`. Dadurch

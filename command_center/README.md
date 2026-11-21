@@ -1,6 +1,6 @@
-# Native command center host
+# MuR Command Center
 
-`rviz_docking_main.cpp` is the native Qt Widgets host. It embeds
+`main.cpp` contains the native Qt Widgets host. It embeds
 `qml/Main.qml` in a `QQuickWidget`, exposes the `SessionController` as the
 `session` QML context object, and keeps RViz in its own dock. The session shell
 is visible before any ROS initialization. Choosing **Connect** initializes the
@@ -30,7 +30,7 @@ Build from a sourced ROS 2 Jazzy workspace:
 ```bash
 colcon build --packages-up-to match_mur_gui --cmake-args -DBUILD_TESTING=ON
 source install/setup.bash
-ros2 run match_mur_gui mur_rviz_docking_prototype
+ros2 run match_mur_gui mur_command_center
 ```
 
 The workspace must also contain the `mir_srvs` interface package from
@@ -51,9 +51,9 @@ same active profile. The optional `--context` label is retained for the host's
 initial title. The GUI supports keys 1–8 to select Overview, Visualization,
 Robot, Processes, Diagnosis, Logs, Settings, and Mocap.
 
-The host remains a prototype; connecting confirms that its RViz node started,
-but does not prove reachability of every remote ROS endpoint. Full simulation
-and hardware launch flows are not yet wired to the shell.
+Connecting starts the RViz session. Use **Diagnosis** to check reachability
+and endpoint types for the selected profile. Simulation workflows are in
+**Processes** and hardware launch options are in **Robot**.
 
 The Diagnosis view reports ROS graph endpoints and controller-manager state.
 In Hardware mode it also reads the selected robot's base/arm controller
@@ -118,7 +118,7 @@ stop action. Bridge output and exit state are recorded with the other launch
 logs. Map/TF output is enabled for an app-started bridge, with the existing
 bridge's calibration validation deciding whether it is available.
 
-## Remote simulation process prototype
+## Remote simulation process management
 
 From the Processes view, select a Simulation preset whose target is a remote
 host and choose **Start remote simulation**. The target must be a host alias or
@@ -133,10 +133,10 @@ process group. Stop connects over SSH again and checks the recorded PID's
 environment for that exact run ID and its process-group ID before sending
 SIGINT to the group. A foreign process is never selected by name or stopped.
 If SSH or the ownership check fails, the process row reports **Stop failed**
-and the log says the remote run may still be active. This prototype does not
+and the log says the remote run may still be active. The app does not
 store SSH credentials; configure SSH keys or an agent on the operator account.
 
-## Hardware start prototype
+## Hardware start
 
 In Hardware mode, the Robot view provides a profile-persistent component and
 launch-options panel. **Run preflight** explicitly checks the selected host and

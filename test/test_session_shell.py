@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_native_session_persists_user_choices_and_starts_disconnected():
-    host = (ROOT / "prototype/rviz_docking_main.cpp").read_text()
-    qml = (ROOT / "prototype/qml/Main.qml").read_text()
+    host = (ROOT / "command_center/main.cpp").read_text()
+    qml = (ROOT / "command_center/qml/Main.qml").read_text()
     assert "QSettings::UserScope" in host and '"MATCH", "MuRCommandCenter"' in host
     assert 'value("activePreset", "Local simulation")' in host
     for field in ("view", "target", "robot", "mode"):
@@ -28,8 +28,8 @@ def test_native_session_persists_user_choices_and_starts_disconnected():
 
 
 def test_new_presets_default_to_overview_and_qml_is_embedded_in_native_host():
-    host = (ROOT / "prototype/rviz_docking_main.cpp").read_text()
-    qml = (ROOT / "prototype/qml/Main.qml").read_text()
+    host = (ROOT / "command_center/main.cpp").read_text()
+    qml = (ROOT / "command_center/qml/Main.qml").read_text()
     assert 'setValue(group + "view", "Overview")' in host
     assert "QQuickWidget" in host and 'setContextProperty("session", session_)' in host
     assert qml.startswith("import QtQuick")
@@ -38,7 +38,7 @@ def test_new_presets_default_to_overview_and_qml_is_embedded_in_native_host():
 
 
 def test_session_choices_restore_after_restart_without_starting_ros(tmp_path):
-    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_command_center"
     environment = os.environ.copy()
     environment["MUR_COMMAND_CENTER_SETTINGS"] = str(tmp_path / "session.ini")
     environment["QT_QPA_PLATFORM"] = "offscreen"
@@ -51,7 +51,7 @@ def test_session_choices_restore_after_restart_without_starting_ros(tmp_path):
 
 
 def test_connect_action_exposes_live_ros_graph_diagnostics(tmp_path):
-    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_command_center"
     environment = os.environ.copy()
     environment["MUR_COMMAND_CENTER_SETTINGS"] = str(tmp_path / "session.ini")
     environment["ROS_DOMAIN_ID"] = "87"
@@ -65,7 +65,7 @@ def test_connect_action_exposes_live_ros_graph_diagnostics(tmp_path):
 
 
 def test_portable_presets_round_trip_and_remap_machine_paths(tmp_path):
-    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_command_center"
     environment = os.environ.copy()
     environment["MUR_COMMAND_CENTER_SETTINGS"] = str(tmp_path / "session.ini")
     environment["QT_QPA_PLATFORM"] = "offscreen"
@@ -78,7 +78,7 @@ def test_portable_presets_round_trip_and_remap_machine_paths(tmp_path):
 
 
 def test_rviz_uses_active_profile_config_and_time_source(tmp_path):
-    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_command_center"
     environment = os.environ.copy()
     environment.pop("MUR_COMMAND_CENTER_SETTINGS", None)
     environment["XDG_CONFIG_HOME"] = str(tmp_path)
@@ -96,7 +96,7 @@ def test_rviz_uses_active_profile_config_and_time_source(tmp_path):
 
 
 def test_missing_rviz_file_leaves_navigation_reachable():
-    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_command_center"
     environment = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software")
     result = subprocess.run(
         [str(executable), "--contract-test-connection-error-layout"],
@@ -106,7 +106,7 @@ def test_missing_rviz_file_leaves_navigation_reachable():
 
 
 def test_settings_exposes_profile_edit_and_portable_file_dialogs():
-    qml = (ROOT / "prototype/qml/Main.qml").read_text()
+    qml = (ROOT / "command_center/qml/Main.qml").read_text()
     assert "Edit profile" in qml
     assert "Save profile" in qml
     assert "Export preset…" in qml

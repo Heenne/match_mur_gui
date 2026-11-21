@@ -35,7 +35,7 @@ def test_fake_launcher_captures_argv_environment_streams_exit_and_owned_stop(tmp
     fake_bin.mkdir()
     (fake_bin / "ros2").symlink_to(fake)
     (fake_bin / "gz").symlink_to(fake)
-    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_command_center"
     environment = os.environ.copy()
     environment.update({
         "MUR_FAKE_LAUNCHER": str(fake),
@@ -82,7 +82,7 @@ def test_remote_simulation_uses_selected_host_and_stops_only_its_owned_run(tmp_p
         "print('remote launch stopped', flush=True)\n"
     )
     fake_ssh.chmod(0o755)
-    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_rviz_docking_prototype"
+    executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_command_center"
     environment = os.environ.copy()
     environment.update({
         "MUR_FAKE_SSH": str(fake_ssh),

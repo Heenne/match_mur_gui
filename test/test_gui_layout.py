@@ -66,6 +66,9 @@ class _RosWorker:
     def start(self):
         pass
 
+    def set_robot_names(self, _robots):
+        pass
+
     def shutdown(self):
         pass
 

@@ -50,6 +50,7 @@
 #include "goals_poses.hpp"
 #include "mocap_controller.hpp"
 #include "ur_arm_jog.hpp"
+#include "ur_freedrive.hpp"
 #include "ur_motion_actions.hpp"
 #include "ur_shutdown.hpp"
 #include "hardware_status.hpp"
@@ -1399,9 +1400,22 @@ public:
     motion_adapter_ = std::make_shared<SshUrMotionActionsAdapter>(ur_arm_jog_adapter_, process_manager_);
     motion_actions_ = new UrMotionActions(motion_adapter_, this);
     motion_actions_->setJog(ur_arm_jog_);
-    connect(motion_actions_, &UrMotionActions::changed, this, [this]() {
-      ur_arm_jog_->setMotionBlocked(motion_actions_->busy());
+    freedrive_adapter_ = std::make_shared<RosUrFreedriveAdapter>(ur_arm_jog_adapter_);
+    freedrive_ = new UrFreedrive(freedrive_adapter_, this);
+    freedrive_->setJog(ur_arm_jog_); freedrive_->setMotion(motion_actions_);
+    auto update_interlock = [this]() {
+      ur_arm_jog_->setMotionBlocked(motion_actions_->busy() || freedrive_->busy());
+      motion_actions_->setMotionBlocked(freedrive_->busy());
+    };
+    connect(motion_actions_, &UrMotionActions::changed, this, update_interlock);
+    connect(freedrive_, &UrFreedrive::changed, this, update_interlock);
+    connect(freedrive_, &UrFreedrive::changed, this, [this]() {
+      if (pending_disconnect_ && !freedrive_->busy()) {
+        pending_disconnect_ = false;
+        QTimer::singleShot(0, this, [this]() { disconnect_ros(); if (pending_close_) { pending_close_ = false; close(); } });
+      }
     });
+    command_center->rootContext()->setContextProperty("urFreedrive", freedrive_);
     command_center->rootContext()->setContextProperty("urMotionActions", motion_actions_);
     command_center->rootContext()->setContextProperty("processes", process_manager_);
     log_store_ = new LogStore(this);
@@ -1419,6 +1433,7 @@ public:
     };
     ur_arm_jog_->setShutdownInterlock(inhibited);
     motion_actions_->setShutdownInterlock(inhibited);
+    freedrive_->setShutdownInterlock(inhibited);
     hardware_start_->setShutdownInterlock([this]() {
       return shutdown_->busy() || shutdown_->anyInhibited(session_->target(), session_->robot());
     });
@@ -1436,9 +1451,10 @@ public:
     shutdown_->setMotionHooks([this](const QString & robot, const QString & side) {
       if (ur_arm_jog_->robot() == robot && ur_arm_jog_->side() == side) ur_arm_jog_->stop("UR shutdown");
       if (motion_actions_->robot() == robot && motion_actions_->side() == side) motion_actions_->cancel();
+      if (freedrive_->robot() == robot && freedrive_->side() == side) freedrive_->leave();
     }, [this](const QString & robot, const QString & side) {
       Q_UNUSED(robot); Q_UNUSED(side);
-      return motion_actions_->busy();
+      return motion_actions_->busy() || freedrive_->busy();
     });
     command_center->rootContext()->setContextProperty("urShutdown", shutdown_);
     update_motion_context();
@@ -1526,6 +1542,8 @@ public:
     if (shutdown_) shutdown_->setContext(session_->mode(), session_->target(), session_->robot(),
       session_->connectionState(), options.value("remote_workspace").toString(),
       options.value("arm_l").toBool(), options.value("arm_r").toBool());
+    freedrive_->setContext(session_->robot(), session_->mode(), session_context(),
+      session_->connectionState() == "Connected", options.value("arm_l").toBool(), options.value("arm_r").toBool());
     motion_actions_->setContext(session_->preset(), session_->mode(), session_->target(),
       session_->rosDomain(), session_->robot(), session_->connectionState(), session_context(),
       options.value("remote_workspace").toString(), options.value("arm_l").toBool(),
@@ -1567,6 +1585,7 @@ public:
     }
     if (rviz_node_ && !connected_context_.isEmpty() && connected_context_ != session_context()) {
       const auto old_context = connected_context_;
+      if (freedrive_->busy()) { disconnect_ros(); return false; }
       disconnect_ros();
       session_->setDiagnostics({"Session context changed · RViz disconnected; connect to attach the selected profile",
         QString("Previous RViz context: %1").arg(old_context)});
@@ -1641,6 +1660,7 @@ public:
         rclcpp::Parameter("use_sim_time", session_->useSimTime()));
       sim_base_jog_adapter_->setNode(rviz_node_->get_raw_node());
       ur_arm_jog_adapter_->setNode(rviz_node_->get_raw_node());
+      freedrive_adapter_->setNode(rviz_node_->get_raw_node());
       lift_adapter_->setNode(rviz_node_->get_raw_node());
       mir_hardware_adapter_->setNode(rviz_node_->get_raw_node());
       goals_poses_adapter_->setNode(rviz_node_->get_raw_node());
@@ -1707,7 +1727,14 @@ public:
 
   void disconnect_ros()
   {
+    if (freedrive_ && freedrive_->busy()) {
+      pending_disconnect_ = true;
+      freedrive_->leave();
+      return;
+    }
     sim_base_jog_->stop("ROS disconnected");
+    freedrive_->leave();
+    freedrive_adapter_->setNode({});
     ur_arm_jog_->stop("ROS disconnected");
     lift_controller_->stop("ROS disconnected");
     mir_hardware_control_->stop("ROS disconnected");
@@ -1744,7 +1771,15 @@ protected:
   void closeEvent(QCloseEvent * event) override
   {
     if (shutdown_ && shutdown_->busy()) { event->ignore(); return; }
+    if (freedrive_ && freedrive_->busy()) {
+      pending_close_ = true;
+      pending_disconnect_ = true;
+      freedrive_->leave();
+      event->ignore();
+      return;
+    }
     sim_base_jog_->stop("window closed");
+    freedrive_->leave();
     ur_arm_jog_->stop("window closed");
     motion_actions_->cancel();
     lift_controller_->stop("window closed");
@@ -1756,6 +1791,8 @@ protected:
 private:
   QString context_;
   QString config_override_;
+  bool pending_disconnect_{false};
+  bool pending_close_{false};
   QString pending_context_;
   QString connected_context_;
   SessionController * session_;
@@ -1774,6 +1811,8 @@ private:
   UrShutdown * shutdown_{nullptr};
   std::shared_ptr<SshUrMotionActionsAdapter> motion_adapter_;
   UrMotionActions * motion_actions_{nullptr};
+  std::shared_ptr<RosUrFreedriveAdapter> freedrive_adapter_;
+  UrFreedrive * freedrive_{nullptr};
   std::shared_ptr<RosLiftAdapter> lift_adapter_;
   LiftController * lift_controller_;
   ProcessManager * process_manager_{nullptr};
@@ -1836,6 +1875,8 @@ int main(int argc, char ** argv)
       // Exercises UR readiness gating and hold-to-run arm motion through an injected fake adapter.
     } else if (arguments[i] == "--contract-test-ur-shutdown") {
       continue;
+    } else if (arguments[i] == "--contract-test-ur-freedrive") {
+      // Exercises freedrive through a fake adapter.
     } else if (arguments[i] == "--contract-test-ur-motion-actions") {
       // Exercises selected-arm motion actions with a fake adapter.
     } else if (arguments[i] == "--contract-test-remote-discovery") {
@@ -1972,6 +2013,7 @@ int main(int argc, char ** argv)
   if (arguments.contains("--contract-test-ur-shutdown")) {
     return run_ur_shutdown_contract_test() ? 0 : 1;
   }
+  if (arguments.contains("--contract-test-ur-freedrive")) return run_ur_freedrive_contract_test() ? 0 : 1;
   if (arguments.contains("--contract-test-ur-motion-actions")) {
     if (!run_ur_motion_actions_contract_test()) {
       qCritical("UR motion actions contract failed");

@@ -86,6 +86,7 @@ public:
   void setShutdownInterlock(std::function<bool(const QString &, const QString &)> fn) { shutdown_interlock_ = std::move(fn); }
   QString robot() const { return robot_; }
   QString side() const { return side_; }
+  void setMotionBlocked(bool blocked) { motion_blocked_ = blocked; }
   QString selectedArm() const;
   QString readiness() const { return readiness_; }
   bool ready() const { return ready_; }
@@ -159,6 +160,7 @@ private:
   bool arm_r_enabled_{false};
   bool ready_{false};
   bool busy_{false};
+  bool motion_blocked_{false};
 };
 
 bool run_ur_motion_actions_contract_test();

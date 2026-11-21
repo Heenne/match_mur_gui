@@ -1,6 +1,7 @@
 # Generated GUI logs and camera diagnostics.
 /logs/
 
-# Python test and runtime bytecode.
+# Python caches and bytecode.
+.pytest_cache/
 __pycache__/
 *.pyc

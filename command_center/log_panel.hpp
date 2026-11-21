@@ -34,3 +34,5 @@ private:
   QLineEdit * session_label_{nullptr};
   QDockWidget * dock_{nullptr};
 };
+
+bool run_log_panel_contract_test();

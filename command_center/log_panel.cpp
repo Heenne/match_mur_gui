@@ -1,6 +1,8 @@
 #include "log_panel.hpp"
 
 #include <QAction>
+#include <QCheckBox>
+#include <QCoreApplication>
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -12,6 +14,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QScrollBar>
 #include <QSizePolicy>
 #include <QTimer>
 #include <QToolButton>
@@ -36,6 +39,10 @@ public:
     auto * severity_menu = new QMenu(severity);
     severity->setMenu(severity_menu);
     filters->addWidget(severity);
+    follow_ = new QCheckBox("Follow latest", this);
+    follow_->setObjectName("followLatest");
+    follow_->setChecked(true);
+    filters->addWidget(follow_);
     for (const auto & level : {QString("DEBUG"), QString("INFO"), QString("WARN"), QString("ERROR"), QString("FATAL")}) {
       auto * check = severity_menu->addAction(level);
       check->setCheckable(true);
@@ -44,16 +51,23 @@ public:
       QObject::connect(check, &QAction::toggled, this, [this, severity]() {
         const auto count = selectedLevels().size();
         severity->setText(count == levels_.size() ? "Severity" : QString("Severity (%1)").arg(count));
-        render();
+        reloadFilteredOutput();
       });
     }
-    QObject::connect(search_, &QLineEdit::textChanged, this, [this]() { render(); });
+    QObject::connect(search_, &QLineEdit::textChanged, this, [this]() { reloadFilteredOutput(); });
     layout->addLayout(filters);
     output_ = new QPlainTextEdit(this);
     output_->setReadOnly(true);
     output_->setLineWrapMode(QPlainTextEdit::NoWrap);
     layout->addWidget(output_, 1);
-    render();
+    auto * vertical = output_->verticalScrollBar();
+    QObject::connect(follow_, &QCheckBox::toggled, this, [vertical](bool follow) {
+      if (follow) vertical->setValue(vertical->maximum());
+    });
+    QObject::connect(vertical, &QScrollBar::rangeChanged, this, [this, vertical](int, int maximum) {
+      if (follow_->isChecked()) vertical->setValue(maximum);
+    });
+    appendNewEntries();
   }
 
   QString source() const { return source_; }
@@ -64,23 +78,42 @@ public:
     return selected;
   }
   QString searchText() const { return search_->text(); }
-  void render()
+  void appendNewEntries()
   {
+    const auto & entries = store_->entries();
+    const auto search = search_->text();
     QStringList lines;
-    for (const auto & entry : store_->entries()) {
+    while (next_entry_ < entries.size()) {
+      const auto & entry = entries.at(next_entry_++);
       if (source_ != "All logs" && entry.source != source_) continue;
       if (!levels_.value(entry.level) || !levels_.value(entry.level)->isChecked()) continue;
-      if (!entry.message.contains(search_->text(), Qt::CaseInsensitive)) continue;
+      if (!entry.message.contains(search, Qt::CaseInsensitive)) continue;
       lines.append(QString("%1  %2  [%3]  %4")
         .arg(entry.time.toString("HH:mm:ss.zzz"), entry.level, entry.source, entry.message));
     }
-    output_->setPlainText(lines.join('\n'));
+    if (lines.isEmpty()) return;
+    auto * vertical = output_->verticalScrollBar();
+    auto * horizontal = output_->horizontalScrollBar();
+    const int old_line = vertical->value();
+    const int old_column = horizontal->value();
+    output_->appendPlainText(lines.join('\n'));
+    vertical->setValue(follow_->isChecked() ? vertical->maximum() : old_line);
+    horizontal->setValue(old_column);
   }
 
 private:
+  void reloadFilteredOutput()
+  {
+    next_entry_ = 0;
+    output_->clear();
+    appendNewEntries();
+  }
+
   LogStore * store_;
   QString source_;
+  int next_entry_{0};
   QLineEdit * search_{};
+  QCheckBox * follow_{};
   QPlainTextEdit * output_{};
   QMap<QString, QAction *> levels_;
 };
@@ -96,8 +129,11 @@ LogPanel::LogPanel(LogStore * store, QWidget * parent) : QWidget(parent), store_
   session_label_->setAccessibleName("Session log location");
   session_label_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
   toolbar->addWidget(session_label_, 1);
+  auto * compare = new QCheckBox("Compare logs", this);
+  compare->setObjectName("compareLogs");
+  toolbar->addWidget(compare);
   auto * full = new QPushButton("Export full recording…", this);
-  auto * filtered = new QPushButton("Export left filtered view…", this);
+  auto * filtered = new QPushButton("Export filtered view…", this);
   toolbar->addWidget(full);
   toolbar->addWidget(filtered);
   root->addLayout(toolbar);
@@ -113,7 +149,13 @@ LogPanel::LogPanel(LogStore * store, QWidget * parent) : QWidget(parent), store_
       if (index == 0) selected_source_ = selectedSource();
     });
   }
+  panes_[1]->hide();
   root->addLayout(split, 1);
+  connect(compare, &QCheckBox::toggled, this, [this, filtered](bool enabled) {
+    panes_[1]->setVisible(enabled);
+    filtered->setText(enabled ? "Export left filtered view…" : "Export filtered view…");
+    if (enabled) refreshSources();
+  });
   connect(store_, &LogStore::changed, this, &LogPanel::refreshSources);
   connect(full, &QPushButton::clicked, this, &LogPanel::exportFull);
   connect(filtered, &QPushButton::clicked, this, &LogPanel::exportFiltered);
@@ -167,11 +209,13 @@ void LogPanel::setSessionLabel(const QString & label)
 
 void LogPanel::refreshSources()
 {
+  const auto sources = store_->sources();
   for (int pane = 0; pane < 2; ++pane) {
+    if (pane == 1 && panes_[pane]->isHidden()) continue;
     for (int i = 0; i < panes_[pane]->count(); ++i) {
-      if (auto * view = dynamic_cast<LogSourceView *>(panes_[pane]->widget(i))) view->render();
+      if (auto * view = dynamic_cast<LogSourceView *>(panes_[pane]->widget(i))) view->appendNewEntries();
     }
-    for (const auto & source : store_->sources()) {
+    for (const auto & source : sources) {
       bool found = false;
       for (int i = 0; i < panes_[pane]->count(); ++i) found |= panes_[pane]->tabText(i) == source;
       if (found) continue;
@@ -203,4 +247,59 @@ void LogPanel::exportFiltered()
     file.write(store_->exportText(view->source(), view->selectedLevels(), view->searchText(), true).toUtf8());
     file.commit();
   }
+}
+
+bool run_log_panel_contract_test()
+{
+  LogStore store;
+  for (int line = 0; line < 80; ++line) {
+    store.append("Simulation", "INFO", QString("Line %1: ").arg(line) + QString(180, 'x'));
+  }
+  LogPanel panel(&store);
+  panel.resize(1050, 300);
+  panel.show();
+  QCoreApplication::processEvents();
+
+  const auto panes = panel.findChildren<QTabWidget *>(QString(), Qt::FindDirectChildrenOnly);
+  if (panes.size() != 2) return false;
+  auto * left_view = panes[0]->currentWidget();
+  auto * left = left_view->findChild<QPlainTextEdit *>();
+  if (!left || left->verticalScrollBar()->maximum() == 0) return false;
+  left->verticalScrollBar()->setValue(left->verticalScrollBar()->maximum());
+  store.append("Simulation", "INFO", "Live output marker");
+  const auto at_tail = [](QPlainTextEdit * view) {
+    return view->verticalScrollBar()->value() == view->verticalScrollBar()->maximum();
+  };
+  if (!at_tail(left)) {
+    qCritical("New live output moved the log away from the latest line");
+    return false;
+  }
+
+  auto * compare = panel.findChild<QCheckBox *>("compareLogs");
+  auto * follow = left_view->findChild<QCheckBox *>("followLatest");
+  if (!compare || compare->isChecked() || panes[1]->isVisible() || !follow || !follow->isChecked()) return false;
+  follow->click();
+  compare->click();
+  QCoreApplication::processEvents();
+  auto * right_view = panes[1]->currentWidget();
+  auto * right = right_view ? right_view->findChild<QPlainTextEdit *>() : nullptr;
+  if (!panes[1]->isVisible() || !right || !at_tail(right)) return false;
+
+  auto * vertical = left->verticalScrollBar();
+  auto * horizontal = left->horizontalScrollBar();
+  const auto read_position = vertical->maximum() / 2;
+  const auto read_column = horizontal->maximum() / 2;
+  vertical->setValue(read_position);
+  horizontal->setValue(read_column);
+  store.append("Simulation", "INFO", "Reading history marker");
+  if (vertical->value() != read_position || horizontal->value() != read_column ||
+    !left->toPlainText().contains("Reading history marker") || !at_tail(right)) {
+    qCritical("An incoming log entry changed the paused pane or failed to update the live pane");
+    return false;
+  }
+
+  follow->click();
+  if (!at_tail(left)) return false;
+  compare->click();
+  return panes[0]->isVisible() && !panes[1]->isVisible();
 }

@@ -2425,7 +2425,7 @@ int main(int argc, char ** argv)
     return 0;
   }
   if (arguments.contains("--contract-test-log-store")) {
-    if (!run_log_store_contract_test()) {
+    if (!run_log_store_contract_test() || !run_log_panel_contract_test()) {
       qCritical("Log store contract failed");
       return 1;
     }

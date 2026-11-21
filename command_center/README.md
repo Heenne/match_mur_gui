@@ -104,6 +104,11 @@ connection and RViz configuration. When auto-open is enabled, starting the
 simulation waits up to 60 seconds for this service. Client launch output and
 failure state appear in Processes.
 
+The Logs dock opens with one view. Enable **Compare logs** to show a second
+view with its own source and filters. **Follow latest** scrolls the active log
+view to new messages. Turn it off to keep your place while messages keep
+arriving, or back on to jump to the latest message.
+
 The optional **Mocap** view reads raw `/qualisys/<robot>/pose`, map-frame
 `/qualisys_map/<robot>/pose`, `/tf_static` (`map -> mocap`), and the per-robot
 `localization_frozen` status. It displays pose/frame, receipt rate, data age,

@@ -14,6 +14,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(mir_srvs REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
 find_package(controller_manager_msgs REQUIRED)
+find_package(ewellix_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(tf2_msgs REQUIRED)
@@ -31,6 +32,8 @@ add_executable(mur_rviz_docking_prototype
   prototype/ros_session_monitor.cpp
   prototype/hardware_status.cpp
   prototype/hardware_status.hpp
+  prototype/lift_controller.cpp
+  prototype/lift_controller.hpp
   prototype/hardware_start.cpp
   prototype/hardware_start.hpp
   prototype/process_manager.cpp
@@ -49,7 +52,7 @@ add_executable(mur_rviz_docking_prototype
 )
 target_compile_features(mur_rviz_docking_prototype PRIVATE cxx_std_17)
 target_link_libraries(mur_rviz_docking_prototype Qt5::Widgets Qt5::QuickWidgets Qt5::Network)
-ament_target_dependencies(mur_rviz_docking_prototype action_msgs actionlib_msgs ament_index_cpp controller_manager_msgs geometry_msgs mir_srvs nav2_msgs rcl_interfaces rclcpp rosgraph_msgs rviz_common sensor_msgs std_msgs std_srvs tf2_msgs ur_dashboard_msgs)
+ament_target_dependencies(mur_rviz_docking_prototype action_msgs actionlib_msgs ament_index_cpp controller_manager_msgs ewellix_interfaces geometry_msgs mir_srvs nav2_msgs rcl_interfaces rclcpp rosgraph_msgs rviz_common sensor_msgs std_msgs std_srvs tf2_msgs ur_dashboard_msgs)
 install(TARGETS mur_rviz_docking_prototype DESTINATION lib/${PROJECT_NAME})
 
 install(PROGRAMS
@@ -74,6 +77,8 @@ if(BUILD_TESTING)
   set_tests_properties(mocap_monitor_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME hardware_status_behavior COMMAND mur_rviz_docking_prototype --contract-test-hardware-status)
   set_tests_properties(hardware_status_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_test(NAME lift_controller_behavior COMMAND mur_rviz_docking_prototype --contract-test-lift-controller)
+  set_tests_properties(lift_controller_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME ur_arm_jog_behavior COMMAND mur_rviz_docking_prototype --contract-test-ur-arm-jog)
   set_tests_properties(ur_arm_jog_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME hardware_start_behavior COMMAND mur_rviz_docking_prototype --contract-test-hardware-start)

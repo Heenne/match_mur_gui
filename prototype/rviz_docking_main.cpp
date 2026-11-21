@@ -1268,7 +1268,9 @@ public:
       QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/poses.json", this)),
     mocap_(new MocapController(this)),
     ur_arm_jog_adapter_(std::make_shared<RosUrArmJogAdapter>()),
-    ur_arm_jog_(new UrArmJog(ur_arm_jog_adapter_, this))
+    ur_arm_jog_(new UrArmJog(ur_arm_jog_adapter_, this)),
+    lift_adapter_(std::make_shared<RosLiftAdapter>()),
+    lift_controller_(new LiftController(lift_adapter_, this))
   {
     setWindowTitle(QString("MuR Command Center · %1").arg(context_));
     resize(1440, 900);
@@ -1283,6 +1285,11 @@ public:
     mir_hardware_control_->setContext(session_->robot(), session_->mode(), session_->target(), false);
     command_center->rootContext()->setContextProperty("mocap", mocap_);
     command_center->rootContext()->setContextProperty("urArmJog", ur_arm_jog_);
+    command_center->rootContext()->setContextProperty("liftController", lift_controller_);
+    lift_controller_->setContext(session_->robot(), session_->mode(), session_->target(), false, session_->preset());
+    connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
+      if (state != Qt::ApplicationActive) lift_controller_->stop("application lost focus");
+    });
     process_manager_ = new ProcessManager(this);
     mocap_->setProcessManager(process_manager_);
     command_center->rootContext()->setContextProperty("processes", process_manager_);
@@ -1318,6 +1325,8 @@ public:
         session_->target(), session_->rosDomain(), session_->robot(), session_->connectionState(),
         session_->workspacePath(), "");
       mocap_->setRobot(session_->robot());
+      lift_controller_->setContext(session_->robot(), session_->mode(), session_->target(),
+        session_->connectionState() == "Connected", session_->preset());
       ur_arm_jog_->setContext(session_->robot(), session_->mode(), session_context(),
         session_->connectionState() == "Connected");
       goals_poses_->setConnected(session_->connectionState() == "Connected" &&
@@ -1470,6 +1479,7 @@ public:
         rclcpp::Parameter("use_sim_time", session_->useSimTime()));
       sim_base_jog_adapter_->setNode(rviz_node_->get_raw_node());
       ur_arm_jog_adapter_->setNode(rviz_node_->get_raw_node());
+      lift_adapter_->setNode(rviz_node_->get_raw_node());
       mir_hardware_adapter_->setNode(rviz_node_->get_raw_node());
       goals_poses_adapter_->setNode(rviz_node_->get_raw_node());
       mocap_->setNode(rviz_node_->get_raw_node());
@@ -1515,6 +1525,7 @@ public:
       rviz_node_.reset();
       sim_base_jog_adapter_->setNode({});
       ur_arm_jog_adapter_->setNode({});
+      lift_adapter_->setNode({});
       mir_hardware_adapter_->setNode({});
       goals_poses_adapter_->setNode({});
       mocap_->setNode({});
@@ -1534,6 +1545,7 @@ public:
   {
     sim_base_jog_->stop("ROS disconnected");
     ur_arm_jog_->stop("ROS disconnected");
+    lift_controller_->stop("ROS disconnected");
     mir_hardware_control_->stop("ROS disconnected");
     ros_spin_timer_.stop();
     diagnosis_timer_.stop();
@@ -1551,6 +1563,7 @@ public:
     rviz_node_.reset();
     sim_base_jog_adapter_->setNode({});
     ur_arm_jog_adapter_->setNode({});
+    lift_adapter_->setNode({});
     mir_hardware_adapter_->setNode({});
     goals_poses_adapter_->setNode({});
     goals_poses_->setConnected(false);
@@ -1567,6 +1580,7 @@ protected:
   {
     sim_base_jog_->stop("window closed");
     ur_arm_jog_->stop("window closed");
+    lift_controller_->stop("window closed");
     mir_hardware_control_->stop("window closed");
     if (rviz_node_) disconnect_ros();
     event->accept();
@@ -1589,6 +1603,8 @@ private:
   MocapController * mocap_;
   std::shared_ptr<RosUrArmJogAdapter> ur_arm_jog_adapter_;
   UrArmJog * ur_arm_jog_;
+  std::shared_ptr<RosLiftAdapter> lift_adapter_;
+  LiftController * lift_controller_;
   ProcessManager * process_manager_{nullptr};
   LogStore * log_store_{nullptr};
   LogPanel * log_panel_{nullptr};

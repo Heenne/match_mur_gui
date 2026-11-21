@@ -135,7 +135,7 @@ Rectangle {
             Label {
                 Layout.fillWidth: true
                 text: panel.controller.status
-                color: panel.controller.status.indexOf("Ready") === 0 || panel.controller.status.indexOf("Target accepted") === 0
+                color: panel.controller.status.indexOf("Ready") === 0 || panel.controller.status.indexOf("Target sent") === 0
                     ? "#45d6a8" : (panel.controller.status.indexOf("Stale") === 0 || panel.controller.status.indexOf("limit") >= 0 ? "#ffb15b" : "#a8bac5")
                 wrapMode: Text.WordWrap
                 Accessible.name: panel.controller.status

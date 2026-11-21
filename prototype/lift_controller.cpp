@@ -269,7 +269,10 @@ bool LiftController::press(const QString & direction)
 
 void LiftController::release()
 {
-  stop("released");
+  repeat_timer_.stop();
+  holding_ = false;
+  holding_direction_.clear();
+  emit changed();
 }
 
 void LiftController::stop(const QString & reason)
@@ -352,7 +355,7 @@ bool LiftController::step(const QString & direction)
     setStatus("Command failed · no confirmation that the lift target was sent");
     return false;
   }
-  setStatus(QString("Target accepted · %1 side %2 to %3 m · step %4 m")
+  setStatus(QString("Target sent · %1 side %2 to %3 m · step %4 m")
     .arg(robot_, side_).arg(target, 0, 'f', 3).arg(std::abs(target - height_meters_), 0, 'f', 3));
   return true;
 }
@@ -422,7 +425,8 @@ void LiftController::updateAvailability()
     else reason = QString("Ready · height %1 m · age %2 s")
       .arg(height_meters_, 0, 'f', 3).arg(age_seconds_, 0, 'f', 1);
   }
-  if (!holding_) setStatus(reason);
+  if (!holding_ && (!is_ready || (!status_.startsWith("Target sent") &&
+    !status_.startsWith("Stopped")))) setStatus(reason);
 }
 
 void LiftController::setStatus(const QString & status)
@@ -450,8 +454,8 @@ bool run_lift_controller_contract_test()
     adapter->targets.front().side == "right" &&
     std::abs(adapter->targets.front().meters - 0.07) < 1.0e-6;
   lift.release();
-  passed = passed && !lift.holding() && adapter->targets.size() == 2 &&
-    std::abs(adapter->targets.back().meters - 0.05) < 1.0e-6 && lift.status().contains("Stopped");
+  passed = passed && !lift.holding() && adapter->targets.size() == 1 &&
+    lift.status().contains("Target sent");
 
   adapter->samples[stateKey("mur620b", "right")] = {true, 0.260, 0.1};
   lift.refresh();
@@ -478,7 +482,7 @@ bool run_lift_controller_contract_test()
   lift.setContext("mur620b", "Hardware", "localhost", true, "Lift contract");
   lift.setLimits(0.3, 0.2);
   passed = passed && !lift.canLiftUp() && !lift.canLiftDown() && !lift.press("up") &&
-    lift.status().contains("Invalid lift limits");
+    lift.status().contains("Invalid configured limits");
 
   lift.setLimits(0.01, 0.25);
   lift.setStepMeters(0.03);

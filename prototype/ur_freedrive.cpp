@@ -4,6 +4,13 @@
 #include <QPointer>
 
 namespace {
+class FakeJog final : public UrArmJogAdapter {
+public:
+ bool connected() const override { return true; }
+ UrArmReadiness inspect(const std::string &, const std::string &) override { return readiness; }
+ void publish(const std::string &, const std::string &, const std::array<double, 6> &) override {}
+ UrArmReadiness readiness;
+};
 class FakeTask final : public UrMotionActionsAdapter {
 public:
  bool connected() const override { return true; }
@@ -50,9 +57,31 @@ bool run_ur_freedrive_contract_test() {
  if (f.enter()) return false;
  f.setShutdownInterlock({});
  auto task = std::make_shared<FakeTask>(); task->readiness = r;
- UrMotionActions motion(task); f.setMotion(&motion);
+ auto jog_adapter = std::make_shared<FakeJog>(); jog_adapter->readiness = r;
+ UrArmJog jog(jog_adapter); jog.setContext("mur620b", "Hardware", "session", true);
+ UrMotionActions motion(task); f.setMotion(&motion); f.setJog(&jog); motion.setJog(&jog);
+ auto update_interlock = [&]() {
+   jog.setMotionBlocked(motion.busy() || f.busy());
+   motion.setMotionBlocked(f.busy());
+ };
+ QObject::connect(&motion, &UrMotionActions::changed, &f, update_interlock);
+ QObject::connect(&f, &UrFreedrive::changed, &f, update_interlock);
  motion.setContext("Lab", "Hardware", "host", 62, "mur620d", "Connected", "session", "$HOME/colcon_ws", true, true);
- if (!motion.startHome()) return false;
+ jog.setArmed(true);
+ if (!jog.armed() || f.enter() || motion.startHome()) return false;
+ jog.setArmed(false);
+ if (!f.enter()) return false;
+ jog.setArmed(true);
+ if (jog.armed() || motion.startHome()) return false;
+ a->done(true, "controller active");
+ if (!f.active() || motion.startHome()) return false;
+ f.leave(); a->done(false, "unconfirmed");
+ jog.setArmed(true);
+ if (!f.busy() || jog.armed() || motion.startHome()) return false;
+ f.leave(); a->done(true, "restored");
+ if (f.busy() || !motion.startHome()) return false;
+ jog.setArmed(true);
+ if (jog.armed()) return false;
  motion.cancel(); motion.refresh();
  if (!motion.busy() || f.enter()) return false;
  return true;

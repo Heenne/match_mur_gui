@@ -157,6 +157,7 @@ def window(monkeypatch, tmp_path):
     from match_mur_gui import base_gui
     from test_gui_layout import _RosWorker
 
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setattr(base_gui, "RosWorker", _RosWorker)
     monkeypatch.setattr(base_gui.MurBaseGui, "_create_gui_log_file", lambda _self: str(tmp_path / "gui.log"))
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])

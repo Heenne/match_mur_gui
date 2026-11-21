@@ -68,6 +68,21 @@ Rectangle {
                     CheckBox { text: "Launch MoveIt"; checked: root.boolOption("launch_moveit"); onToggled: root.saveOption("launch_moveit", checked) }
                 }
                 RowLayout {
+                    Label { text: "Localization for next start"; color: "#dce6eb" }
+                    ComboBox {
+                        id: localizationSource
+                        enabled: root.boolOption("launch_mir")
+                        textRole: "label"
+                        model: [ {label: "MiR controller", value: "mir"},
+                                 {label: "Qualisys / Mocap", value: "mocap"},
+                                 {label: "AMCL · saved map", value: "amcl"} ]
+                        currentIndex: root.workflow.options.localization_source === "mocap" ? 1 : root.workflow.options.localization_source === "amcl" ? 2 : 0
+                        onActivated: root.saveOption("localization_source", model[currentIndex].value)
+                    }
+                    Label { text: root.workflow.localizationState; color: "#f0b44d" }
+                }
+                Label { Layout.fillWidth: true; text: root.workflow.localizationDetail; color: "#a8bac5"; wrapMode: Text.WordWrap }
+                RowLayout {
                     Label { text: "MoveIt speed: " + root.workflow.options.moveit_speed_percent + "%"; color: "#dce6eb" }
                     Slider {
                         Layout.fillWidth: true

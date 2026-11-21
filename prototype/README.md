@@ -184,3 +184,7 @@ service errors are shown in the panel. Missing or incompatible services are
 reported without trying another namespace. RGB values are clamped to 0–255.
 All jog and lighting behavior tests use a fake adapter; no physical MiR was
 connected during development.
+
+### Lift controls
+
+The Robot view selects the left or right hardware lift and displays its current height, age, step and configured limits. Motion requires a fresh Ewellix state and a compatible command subscriber; Simulation does not fall back to hardware topics. The adapter uses the MuR hardware launch default conversion of 3225 ticks per metre and the 0.005–0.260 m range. Installations using different lift calibration or limits require a matching adapter/profile before use. A sent target is not a hardware acknowledgement. Holding a direction repeats steps; releasing stops further targets. The Stop button or loss of application focus while holding requests a hold at the latest fresh height, but cannot guarantee a physical stop. Validate the adapter with the intended hardware separately.

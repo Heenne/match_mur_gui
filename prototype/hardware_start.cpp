@@ -134,6 +134,7 @@ void SshHardwareStartAdapter::startHardware(const HardwareStartConfig & config,
 {
   QVariantMap options{{"arm_l", config.arms.contains("UR10_l")}, {"arm_r", config.arms.contains("UR10_r")},
     {"launch_mir", config.launch_mir}, {"launch_cameras", config.launch_cameras},
+    {"localization_source", config.localization_source},
     {"integrated_controller", config.integrated_controller}, {"use_ft_sensor", config.use_ft_sensor},
     {"require_wrench", config.require_wrench}, {"collision_avoidance", config.collision_avoidance},
     {"collision_markers", config.collision_markers}, {"zero_admittance", config.zero_admittance},
@@ -265,7 +266,7 @@ QVariantMap HardwareStartController::defaultOptions() const
     {"launch_cameras", false}, {"integrated_controller", true}, {"use_ft_sensor", true},
     {"require_wrench", false}, {"collision_avoidance", true}, {"collision_markers", false},
     {"zero_admittance", false}, {"launch_moveit", true}, {"moveit_speed_percent", 20},
-    {"remote_workspace", "$HOME/colcon_ws"}};
+    {"remote_workspace", "$HOME/colcon_ws"}, {"localization_source", "mir"}};
 }
 
 void HardwareStartController::setContext(const QString & preset, const QString & mode,
@@ -275,6 +276,7 @@ void HardwareStartController::setContext(const QString & preset, const QString &
 {
   const auto old_fingerprint = contextFingerprint();
   const auto old_preset = preset_;
+  const auto old_target = host_ + "|" + robot_ + "|" + QString::number(ros_domain_) + "|" + connection_state_;
   preset_ = preset.trimmed();
   mode_ = mode.trimmed();
   host_ = host.trimmed();
@@ -292,6 +294,8 @@ void HardwareStartController::setContext(const QString & preset, const QString &
     settings_->endGroup();
   }
   remote_workspace_ = options_.value("remote_workspace", remote_workspace.trimmed()).toString();
+  if (old_target != host_ + "|" + robot_ + "|" + QString::number(ros_domain_) + "|" + connection_state_)
+    localization_statuses_.clear();
   if (old_fingerprint != contextFingerprint()) invalidatePreflight(
     "Target, robot, connection or arm selection changed; run preflight again.");
   emit changed();
@@ -301,6 +305,11 @@ void HardwareStartController::setOption(const QString & name, const QVariant & v
 {
   if (!options_.contains(name)) return;
   QVariant normalized = value;
+  if (name == "localization_source") {
+    const auto source = value.toString().trimmed();
+    if (source != "mir" && source != "mocap" && source != "amcl") return;
+    normalized = source;
+  }
   if (name == "moveit_speed_percent") {
     bool ok = false;
     const int speed = value.toInt(&ok);
@@ -311,9 +320,37 @@ void HardwareStartController::setOption(const QString & name, const QVariant & v
   options_.insert(name, normalized);
   if (name == "remote_workspace") remote_workspace_ = normalized.toString().trimmed();
   saveOptions();
-  if (name == "arm_l" || name == "arm_r" || name == "remote_workspace") invalidatePreflight(
-    "Selected arms changed; run preflight again.");
+  if (name == "arm_l" || name == "arm_r" || name == "remote_workspace" ||
+    name == "localization_source") invalidatePreflight(
+    "Hardware start options changed; run preflight again.");
   emit changed();
+}
+
+void HardwareStartController::setLocalizationStatus(const QString & source, const QString & state,
+  const QString & detail)
+{
+  if (source != "mir" && source != "mocap" && source != "amcl") return;
+  static const QStringList allowed_states{"Ready", "Blocked", "Waiting", "Unknown"};
+  if (!allowed_states.contains(state)) return;
+  const auto status = QVariantMap{{"state", state}, {"detail", detail}};
+  if (localization_statuses_.value(source) == status) return;
+  localization_statuses_.insert(source, status);
+  emit changed();
+}
+
+QString HardwareStartController::localizationState() const
+{
+  const auto source = options_.value("localization_source", "mir").toString();
+  return localization_statuses_.value(source).value("state", "Unknown").toString();
+}
+
+QString HardwareStartController::localizationDetail() const
+{
+  const auto source = options_.value("localization_source", "mir").toString();
+  return localization_statuses_.value(source).value("detail",
+    source == "amcl" ? "AMCL source adapter is not available in this command center; existing AMCL sessions cannot yet be verified." :
+    source == "mocap" ? "Waiting for a fresh calibrated Qualisys map pose and map → mocap TF." :
+    "MiR localization data has not been confirmed; it may become available after launch.").toString();
 }
 
 HardwareStartConfig HardwareStartController::config() const
@@ -337,6 +374,7 @@ HardwareStartConfig HardwareStartController::config() const
   result.zero_admittance = options_.value("zero_admittance").toBool();
   result.launch_moveit = options_.value("launch_moveit").toBool();
   result.moveit_speed_percent = options_.value("moveit_speed_percent").toInt();
+  result.localization_source = options_.value("localization_source", "mir").toString();
   return result;
 }
 
@@ -344,7 +382,8 @@ QString HardwareStartController::contextFingerprint() const
 {
   return QString("%1|%2|%3|%4|%5|%6|%7|%8")
     .arg(preset_, mode_, host_).arg(ros_domain_)
-    .arg(robot_, connection_state_, selected_arms(options_).join(','), remote_workspace_);
+    .arg(robot_, connection_state_, selected_arms(options_).join(','),
+      remote_workspace_ + "|" + options_.value("localization_source", "mir").toString());
 }
 
 void HardwareStartController::invalidatePreflight(const QString & reason)
@@ -418,6 +457,15 @@ void HardwareStartController::startHardware()
   if (selected_arms(options_).isEmpty() && !options_.value("launch_mir").toBool()) {
     state_ = "Blocked";
     message_ = "Select at least one UR arm or the MiR base before starting hardware.";
+    emit changed();
+    return;
+  }
+  if (options_.value("launch_mir").toBool() &&
+    options_.value("localization_source").toString() != "mir" && localizationState() != "Ready") {
+    state_ = "Blocked";
+    const auto source = options_.value("localization_source", "mir").toString();
+    message_ = QString("Hardware start blocked: %1 localization is %2. %3")
+      .arg(source, localizationState().toLower(), localizationDetail());
     emit changed();
     return;
   }

@@ -138,10 +138,17 @@ void UrArmJog::selectArm(const QString & side)
   refresh();
 }
 
+void UrArmJog::setMotionBlocked(bool blocked)
+{
+  if (blocked == motion_blocked_) return;
+  motion_blocked_ = blocked;
+  if (blocked) stop("another arm motion is active");
+}
+
 void UrArmJog::setArmed(bool armed)
 {
   refresh();
-  const bool can_arm = armed && mode_ == "Hardware" && context_connected_ &&
+  const bool can_arm = armed && !motion_blocked_ && mode_ == "Hardware" && context_connected_ &&
     !robot_.isEmpty() && readiness_ok_;
   if (armed && !can_arm) {
     armed_ = false;

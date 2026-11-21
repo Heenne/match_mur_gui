@@ -452,3 +452,12 @@ void ProcessManager::appendLog(const QString & line)
   if (log_store_) log_store_->append("Process manager", "INFO", safe);
   emit logChanged();
 }
+
+bool ProcessManager::startRemoteOwnedCommand(const QString & name, const QString & host,
+  int ros_domain, const QString & command, const QString & start_log)
+{
+  static const QRegularExpression valid_host("^[A-Za-z0-9][A-Za-z0-9.-]*$");
+  if (name.trimmed().isEmpty() || !valid_host.match(host).hasMatch() ||
+      host == "localhost" || ros_domain < 0 || ros_domain > 232 || command.isEmpty()) return false;
+  return startRemoteOwnedProcess(name, host, ros_domain, command, start_log);
+}

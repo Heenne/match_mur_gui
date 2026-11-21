@@ -50,6 +50,7 @@
 #include "goals_poses.hpp"
 #include "mocap_controller.hpp"
 #include "ur_arm_jog.hpp"
+#include "ur_motion_actions.hpp"
 #include "hardware_status.hpp"
 #include "hardware_start.hpp"
 #include "std_msgs/msg/string.hpp"
@@ -1284,6 +1285,13 @@ public:
     command_center->rootContext()->setContextProperty("urArmJog", ur_arm_jog_);
     process_manager_ = new ProcessManager(this);
     mocap_->setProcessManager(process_manager_);
+    motion_adapter_ = std::make_shared<SshUrMotionActionsAdapter>(ur_arm_jog_adapter_, process_manager_);
+    motion_actions_ = new UrMotionActions(motion_adapter_, this);
+    motion_actions_->setJog(ur_arm_jog_);
+    connect(motion_actions_, &UrMotionActions::changed, this, [this]() {
+      ur_arm_jog_->setMotionBlocked(motion_actions_->busy());
+    });
+    command_center->rootContext()->setContextProperty("urMotionActions", motion_actions_);
     command_center->rootContext()->setContextProperty("processes", process_manager_);
     log_store_ = new LogStore(this);
     process_manager_->setLogStore(log_store_);
@@ -1292,6 +1300,8 @@ public:
     hardware_start_->setContext(session_->preset(), session_->mode(), session_->target(),
       session_->rosDomain(), session_->robot(), session_->connectionState(), session_->workspacePath(), "");
     command_center->rootContext()->setContextProperty("hardwareStart", hardware_start_);
+    connect(hardware_start_, &HardwareStartController::changed, this, [this]() { update_motion_context(); });
+    update_motion_context();
     log_store_->append("ROS /rosout", "WARN",
       "Live ROS logs are unavailable until this session connects to a ROS graph.");
     log_panel_ = new LogPanel(log_store_);
@@ -1316,6 +1326,7 @@ public:
       if (hardware_start_) hardware_start_->setContext(session_->preset(), session_->mode(),
         session_->target(), session_->rosDomain(), session_->robot(), session_->connectionState(),
         session_->workspacePath(), "");
+      update_motion_context();
       mocap_->setRobot(session_->robot());
       ur_arm_jog_->setContext(session_->robot(), session_->mode(), session_context(),
         session_->connectionState() == "Connected");
@@ -1358,6 +1369,16 @@ public:
       session_->setSimulationServerAvailable(session_monitor_->simulationServerAvailable());
       session_->setDiagnostics(session_diagnostics());
     }
+  }
+
+  void update_motion_context()
+  {
+    if (!motion_actions_ || !hardware_start_) return;
+    const auto options = hardware_start_->options();
+    motion_actions_->setContext(session_->preset(), session_->mode(), session_->target(),
+      session_->rosDomain(), session_->robot(), session_->connectionState(), session_context(),
+      options.value("remote_workspace").toString(), options.value("arm_l").toBool(),
+      options.value("arm_r").toBool());
   }
 
   QString session_context() const
@@ -1566,6 +1587,7 @@ protected:
   {
     sim_base_jog_->stop("window closed");
     ur_arm_jog_->stop("window closed");
+    motion_actions_->cancel();
     mir_hardware_control_->stop("window closed");
     if (rviz_node_) disconnect_ros();
     event->accept();
@@ -1588,6 +1610,8 @@ private:
   MocapController * mocap_;
   std::shared_ptr<RosUrArmJogAdapter> ur_arm_jog_adapter_;
   UrArmJog * ur_arm_jog_;
+  std::shared_ptr<SshUrMotionActionsAdapter> motion_adapter_;
+  UrMotionActions * motion_actions_{nullptr};
   ProcessManager * process_manager_{nullptr};
   LogStore * log_store_{nullptr};
   LogPanel * log_panel_{nullptr};
@@ -1640,6 +1664,8 @@ int main(int argc, char ** argv)
       // Exercises Qualisys status, map output, freeze/resume, and external bridge ownership with a local ROS graph.
     } else if (arguments[i] == "--contract-test-ur-arm-jog") {
       // Exercises UR readiness gating and hold-to-run arm motion through an injected fake adapter.
+    } else if (arguments[i] == "--contract-test-ur-motion-actions") {
+      // Exercises selected-arm motion actions with a fake adapter.
     } else if (arguments[i] == "--contract-test-remote-discovery") {
       // Exercises DDS environment setup without initializing ROS.
     } else if (arguments[i] == "--contract-test-process-manager") {
@@ -1750,6 +1776,14 @@ int main(int argc, char ** argv)
       return 1;
     }
     qInfo("UR arm jog contract passed");
+    return 0;
+  }
+  if (arguments.contains("--contract-test-ur-motion-actions")) {
+    if (!run_ur_motion_actions_contract_test()) {
+      qCritical("UR motion actions contract failed");
+      return 1;
+    }
+    qInfo("UR motion actions contract passed");
     return 0;
   }
   if (arguments.contains("--contract-test-mir-hardware-control")) {

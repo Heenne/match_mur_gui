@@ -7,14 +7,14 @@ Rectangle {
     id: root
     required property var goals
     required property var sessionController
-    color: "#1b2933"; radius: 12; border.color: "#2b3c47"
+    color: theme.surface; radius: 12; border.color: theme.line
     implicitHeight: Math.max(440, controls.implicitHeight + 36)
     ColumnLayout {
         id: controls
         anchors.fill: parent; anchors.margins: 18; spacing: 10
-        Label { text: "Goals and saved poses"; color: "#f2f6f8"; font.pixelSize: 20; font.bold: true }
-        Label { Layout.fillWidth: true; text: goals.adapterStatus(sessionController.robot, sessionController.mode); color: "#a8bac5"; wrapMode: Text.WordWrap }
-        Label { Layout.fillWidth: true; text: "Selected robot: " + sessionController.robot + " · frame: " + frame.text + " · position [m] · yaw [deg]"; color: "#a8bac5" }
+        Label { text: "Goals and saved poses"; color: theme.ink; font.pixelSize: 20; font.bold: true }
+        Label { Layout.fillWidth: true; text: goals.adapterStatus(sessionController.robot, sessionController.mode); color: theme.muted; wrapMode: Text.WordWrap }
+        Label { Layout.fillWidth: true; text: "Selected robot: " + sessionController.robot + " · frame: " + frame.text + " · position [m] · yaw [deg]"; color: theme.muted }
         RowLayout {
             Layout.fillWidth: true
             TextField { id: poseName; Layout.fillWidth: true; placeholderText: "Pose name"; Accessible.name: "Pose name" }
@@ -50,7 +50,7 @@ Rectangle {
                 Button { text: "Cancel navigation"; enabled: !goals.busy; onClicked: goals.cancelSelected(sessionController.robot, sessionController.mode) }
             }
         }
-        Label { Layout.fillWidth: true; text: goals.status; color: goals.status.toLowerCase().indexOf("failed") >= 0 || goals.status.toLowerCase().indexOf("rejected") >= 0 || goals.status.toLowerCase().indexOf("unavailable") >= 0 || goals.status.toLowerCase().indexOf("not sent") >= 0 || goals.status.toLowerCase().indexOf("did not accept") >= 0 || goals.status.toLowerCase().indexOf("stale") >= 0 || goals.status.indexOf("Could not") >= 0 ? "#ff9b8e" : "#a8bac5"; wrapMode: Text.WordWrap; Accessible.name: goals.status }
+        Label { Layout.fillWidth: true; text: goals.status; color: goals.status.toLowerCase().indexOf("failed") >= 0 || goals.status.toLowerCase().indexOf("rejected") >= 0 || goals.status.toLowerCase().indexOf("unavailable") >= 0 || goals.status.toLowerCase().indexOf("not sent") >= 0 || goals.status.toLowerCase().indexOf("did not accept") >= 0 || goals.status.toLowerCase().indexOf("stale") >= 0 || goals.status.indexOf("Could not") >= 0 ? theme.danger : theme.muted; wrapMode: Text.WordWrap; Accessible.name: goals.status }
     }
     NativeDialogs.FileDialog {
         id: importFileDialog

@@ -9,9 +9,9 @@ Item {
     implicitHeight: Math.max(390, controls.implicitHeight + 36)
     focus: true
     activeFocusOnTab: true
-    property color panelColor: "#1b2933"
-    property color foreground: "#f2f6f8"
-    property color muted: "#a8bac5"
+    property color panelColor: theme.surface
+    property color foreground: theme.ink
+    property color muted: theme.muted
     property int heldKey: -1
 
     function directionForKey(key) {
@@ -84,7 +84,7 @@ Item {
         anchors.fill: parent
         color: panel.panelColor
         radius: 12
-        border.color: "#2b3c47"
+        border.color: theme.line
         ColumnLayout {
             id: controls
             anchors.fill: parent
@@ -150,7 +150,7 @@ Item {
             Label {
                 Layout.fillWidth: true
                 text: simBaseJog.status
-                color: simBaseJog.holding ? "#45d6a8" : panel.muted
+                color: simBaseJog.holding ? theme.accent : panel.muted
                 Accessible.name: simBaseJog.status
             }
         }
@@ -162,8 +162,8 @@ Item {
         width: 108
         height: 56
         radius: 8
-        color: holdArea.pressed ? "#397f80" : "#243640"
-        border.color: "#48616d"
+        color: holdArea.pressed ? theme.selectedLine : theme.raised
+        border.color: theme.line
         Label { anchors.centerIn: parent; text: parent.text; color: panel.foreground; font.bold: true }
         MouseArea {
             id: holdArea

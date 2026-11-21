@@ -1,4 +1,5 @@
 #include "log_panel.hpp"
+#include "app_theme.hpp"
 
 #include <QAction>
 #include <QCheckBox>
@@ -6,6 +7,7 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QMainWindow>
@@ -13,15 +15,38 @@
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QScrollBar>
 #include <QSizePolicy>
+#include <QSyntaxHighlighter>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 namespace
 {
+class LogHighlighter : public QSyntaxHighlighter
+{
+public:
+  using QSyntaxHighlighter::QSyntaxHighlighter;
+
+private:
+  void highlightBlock(const QString & text) override
+  {
+    static const QRegularExpression prefix(R"(^(\d\d:\d\d:\d\d\.\d{3})\s+(DEBUG|INFO|WARN|ERROR|FATAL)\s+(\[[^\]]*\]))");
+    const auto match = prefix.match(text);
+    if (!match.hasMatch()) return;
+    const auto & theme = app_theme::colors();
+    const auto level = match.captured(2);
+    const auto tone = level == "INFO" ? "accent" : level == "WARN" ? "warning" :
+      level == "DEBUG" ? "muted" : "danger";
+    setFormat(match.capturedStart(1), match.capturedLength(1), theme.value("subtle").value<QColor>());
+    setFormat(match.capturedStart(2), match.capturedLength(2), theme.value(tone).value<QColor>());
+    setFormat(match.capturedStart(3), match.capturedLength(3), theme.value("info").value<QColor>());
+  }
+};
+
 class LogSourceView : public QWidget
 {
 public:
@@ -59,6 +84,8 @@ public:
     output_ = new QPlainTextEdit(this);
     output_->setReadOnly(true);
     output_->setLineWrapMode(QPlainTextEdit::NoWrap);
+    output_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    new LogHighlighter(output_->document());
     layout->addWidget(output_, 1);
     auto * vertical = output_->verticalScrollBar();
     QObject::connect(follow_, &QCheckBox::toggled, this, [vertical](bool follow) {
@@ -82,14 +109,16 @@ public:
   {
     const auto & entries = store_->entries();
     const auto search = search_->text();
+    static const QRegularExpression ansi_escape(R"(\x1b\[[0-?]*[ -/]*[@-~])");
     QStringList lines;
     while (next_entry_ < entries.size()) {
       const auto & entry = entries.at(next_entry_++);
       if (source_ != "All logs" && entry.source != source_) continue;
       if (!levels_.value(entry.level) || !levels_.value(entry.level)->isChecked()) continue;
       if (!entry.message.contains(search, Qt::CaseInsensitive)) continue;
+      const auto message = QString(entry.message).remove(ansi_escape);
       lines.append(QString("%1  %2  [%3]  %4")
-        .arg(entry.time.toString("HH:mm:ss.zzz"), entry.level, entry.source, entry.message));
+        .arg(entry.time.toString("HH:mm:ss.zzz"), entry.level, entry.source, message));
     }
     if (lines.isEmpty()) return;
     auto * vertical = output_->verticalScrollBar();
@@ -121,10 +150,13 @@ private:
 
 LogPanel::LogPanel(LogStore * store, QWidget * parent) : QWidget(parent), store_(store)
 {
+  setObjectName("commandLogPanel");
   auto * root = new QVBoxLayout(this);
+  root->setContentsMargins(10, 6, 10, 10);
   auto * toolbar = new QHBoxLayout;
   session_label_ = new QLineEdit(this);
   session_label_->setReadOnly(true);
+  session_label_->setObjectName("sessionLogLocation");
   session_label_->setFrame(false);
   session_label_->setAccessibleName("Session log location");
   session_label_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
@@ -201,10 +233,9 @@ void LogPanel::raiseDock()
 
 void LogPanel::setSessionLabel(const QString & label)
 {
-  const auto description = "Full session log · " + label + " · " + store_->filePath();
-  session_label_->setText(description);
+  session_label_->setText(store_->filePath());
   session_label_->setCursorPosition(0);
-  session_label_->setToolTip(description);
+  session_label_->setToolTip("Session log · " + label + '\n' + store_->filePath());
 }
 
 void LogPanel::refreshSources()

@@ -7,9 +7,9 @@ Rectangle {
     id: root
     required property var controller
     required property var sessionController
-    color: "#1b2933"
+    color: theme.surface
     radius: 12
-    border.color: "#2b3c47"
+    border.color: theme.line
 
     ColumnLayout {
         id: controls
@@ -17,11 +17,11 @@ Rectangle {
         anchors.margins: 20
         spacing: 14
 
-        Label { text: "Qualisys / Mocap"; color: "#f2f6f8"; font.pixelSize: 22; font.bold: true }
+        Label { text: "Qualisys / Mocap"; color: theme.ink; font.pixelSize: 22; font.bold: true }
         Label {
             Layout.fillWidth: true
             text: "Optional pose monitor for " + root.sessionController.robot + ". Existing ROS bridges are detected and left under their current owner's control."
-            color: "#a8bac5"
+            color: theme.muted
             wrapMode: Text.WordWrap
         }
 
@@ -30,22 +30,22 @@ Rectangle {
             columns: 2
             columnSpacing: 18
             rowSpacing: 8
-            Label { text: "Raw pose"; color: "#a8bac5" }
-            Label { Layout.fillWidth: true; text: root.controller.poseStatus; color: root.controller.poseStatus.indexOf("Stale") >= 0 ? "#f0b44d" : "#45d6a8"; Accessible.name: root.controller.poseStatus }
-            Label { text: "Position / orientation"; color: "#a8bac5" }
-            Label { Layout.fillWidth: true; text: root.controller.pose + " · frame " + (root.controller.poseFrame || "unknown"); color: "#f2f6f8"; wrapMode: Text.WordWrap }
-            Label { text: "Rate and age"; color: "#a8bac5" }
-            Label { text: (root.controller.frequencyHz > 0 ? root.controller.frequencyHz.toFixed(1) + " Hz" : "— Hz") + " · " + (root.controller.dataAgeSeconds >= 0 ? root.controller.dataAgeSeconds.toFixed(2) + " s old" : "no data"); color: "#f2f6f8" }
-            Label { text: "Map / TF"; color: "#a8bac5" }
-            Label { Layout.fillWidth: true; text: root.controller.mapStatus; color: root.controller.mapStatus.indexOf("active") >= 0 ? "#45d6a8" : "#f0b44d"; wrapMode: Text.WordWrap; Accessible.name: root.controller.mapStatus }
-            Label { text: "Localization hold"; color: "#a8bac5" }
-            Label { Layout.fillWidth: true; text: root.controller.freezeStatus; color: root.controller.frozen ? "#f0b44d" : "#f2f6f8"; wrapMode: Text.WordWrap }
-            Label { text: "Bridge ownership"; color: "#a8bac5" }
-            Label { Layout.fillWidth: true; text: root.controller.bridgeState; color: root.controller.bridgeState.indexOf("external") >= 0 ? "#45d6a8" : (root.controller.bridgeState.indexOf("Failed") >= 0 ? "#f07178" : "#f2f6f8"); wrapMode: Text.WordWrap }
+            Label { text: "Raw pose"; color: theme.muted }
+            Label { Layout.fillWidth: true; text: root.controller.poseStatus; color: root.controller.poseStatus.indexOf("Stale") >= 0 ? theme.warning : theme.accent; Accessible.name: root.controller.poseStatus }
+            Label { text: "Position / orientation"; color: theme.muted }
+            Label { Layout.fillWidth: true; text: root.controller.pose + " · frame " + (root.controller.poseFrame || "unknown"); color: theme.ink; wrapMode: Text.WordWrap }
+            Label { text: "Rate and age"; color: theme.muted }
+            Label { text: (root.controller.frequencyHz > 0 ? root.controller.frequencyHz.toFixed(1) + " Hz" : "— Hz") + " · " + (root.controller.dataAgeSeconds >= 0 ? root.controller.dataAgeSeconds.toFixed(2) + " s old" : "no data"); color: theme.ink }
+            Label { text: "Map / TF"; color: theme.muted }
+            Label { Layout.fillWidth: true; text: root.controller.mapStatus; color: root.controller.mapStatus.indexOf("active") >= 0 ? theme.accent : theme.warning; wrapMode: Text.WordWrap; Accessible.name: root.controller.mapStatus }
+            Label { text: "Localization hold"; color: theme.muted }
+            Label { Layout.fillWidth: true; text: root.controller.freezeStatus; color: root.controller.frozen ? theme.warning : theme.ink; wrapMode: Text.WordWrap }
+            Label { text: "Bridge ownership"; color: theme.muted }
+            Label { Layout.fillWidth: true; text: root.controller.bridgeState; color: root.controller.bridgeState.indexOf("external") >= 0 ? theme.accent : (root.controller.bridgeState.indexOf("Failed") >= 0 ? theme.danger : theme.ink); wrapMode: Text.WordWrap }
         }
 
-        Rectangle { Layout.fillWidth: true; height: 1; color: "#354752" }
-        Label { text: "Bridge connection"; color: "#f2f6f8"; font.pixelSize: 17; font.bold: true }
+        Rectangle { Layout.fillWidth: true; height: 1; color: theme.line }
+        Label { text: "Bridge connection"; color: theme.ink; font.pixelSize: 17; font.bold: true }
         GridLayout {
             Layout.fillWidth: true
             columns: width < 540 ? 2 : 4
@@ -81,7 +81,7 @@ Rectangle {
         Label {
             Layout.fillWidth: true
             text: "Map output and localization freeze use the Qualisys bridge's /qualisys/enable_map_output and per-robot freeze_localization services. A failed calibration or stale pose is reported by the bridge."
-            color: "#a8bac5"
+            color: theme.muted
             wrapMode: Text.WordWrap
         }
         Item { Layout.fillHeight: true }

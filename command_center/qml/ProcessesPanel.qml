@@ -14,9 +14,9 @@ Rectangle {
     readonly property bool gazeboServerReady: processManager.gazeboServerStatus === "Available"
     readonly property string gazeboClientState: processState("Gazebo world view")
     readonly property bool gazeboClientActive: gazeboClientState === "Running" || gazeboClientState === "Starting"
-    color: "#1b2933"
+    color: theme.surface
     radius: 12
-    border.color: "#2b3c47"
+    border.color: theme.line
 
     function processState(name) {
         for (let i = 0; i < processManager.processes.length; ++i) {
@@ -48,19 +48,20 @@ Rectangle {
         anchors.margins: 18
         spacing: 12
 
-        Label { text: "Processes"; color: "#f2f6f8"; font.pixelSize: 20; font.bold: true }
+        Label { text: "Processes"; color: theme.ink; font.pixelSize: 20; font.bold: true }
         Label {
             Layout.fillWidth: true
             text: root.isLocalTarget()
                   ? "Start the local MuR620 simulation in one action. Gazebo can run headless; its world view is a separate client."
                   : "Start the MuR620 simulation over SSH on " + session.target + ". The remote ROS 2 Jazzy workspace must be available in a login shell; SSH keys or an agent must allow non-interactive access."
-            color: "#a8bac5"
+            color: theme.muted
             wrapMode: Text.WordWrap
         }
         Flow {
             Layout.fillWidth: true
             spacing: 6
-            Button {
+            ActionButton {
+                primary: true
                 text: root.isLocalTarget() ? "Start simulation" : "Start remote simulation"
                 enabled: session.mode === "Simulation"
                 onClicked: {
@@ -76,7 +77,7 @@ Rectangle {
                     }
                 }
             }
-            Button {
+            ActionButton {
                 text: root.gazeboClientActive ? "Close Gazebo world view" : "Open Gazebo world view"
                 enabled: root.gazeboClientActive || (root.localSimulation && root.gazeboServerReady)
                 onClicked: {
@@ -84,14 +85,14 @@ Rectangle {
                     else root.processManager.startGazeboView()
                 }
             }
-            Button { text: "Stop app-owned processes"; onClicked: { root.waitingForSimulationServer = false; root.processManager.stopAll() } }
-            Button { text: "Open session log"; onClicked: { logs.showSource("All logs"); logs.raiseDock() } }
+            ActionButton { text: "Stop app-owned processes"; onClicked: { root.waitingForSimulationServer = false; root.processManager.stopAll() } }
+            ActionButton { text: "Open session log"; onClicked: { logs.showSource("All logs"); logs.raiseDock() } }
         }
         Label {
             Layout.fillWidth: true
             visible: root.localSimulation
             text: root.gazeboStatusText()
-            color: root.gazeboServerReady ? "#45d6a8" : "#a8bac5"
+            color: root.gazeboServerReady ? theme.accent : theme.muted
             wrapMode: Text.WordWrap
         }
         Timer {
@@ -117,7 +118,7 @@ Rectangle {
                 }
             }
         }
-        Rectangle { Layout.fillWidth: true; height: 1; color: "#354752" }
+        Rectangle { Layout.fillWidth: true; height: 1; color: theme.line }
         ScrollView {
             id: processList
             Layout.fillWidth: true
@@ -138,7 +139,7 @@ Rectangle {
                         readonly property var recentLines: root.recentLogLines(modelData.log)
                         width: parent.width
                         implicitHeight: processColumn.implicitHeight + 20
-                        color: "#14212a"
+                        color: theme.canvas
                         radius: 8
                         clip: true
                         ColumnLayout {
@@ -147,9 +148,9 @@ Rectangle {
                             anchors.margins: 10
                             RowLayout {
                                 Layout.fillWidth: true
-                                Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: modelData.name + " · " + (modelData.host || "local"); color: "#f2f6f8"; font.bold: true; wrapMode: Text.Wrap }
-                                Label { text: modelData.state; color: modelData.state === "Failed" || modelData.state === "Stop failed" || modelData.state === "Stop unconfirmed" ? "#f07178" : modelData.state === "Connecting" || modelData.state === "Stopping" ? "#f0b44d" : "#45d6a8" }
-                                Label { text: modelData.exitCode >= 0 ? "exit " + modelData.exitCode : ""; color: "#a8bac5" }
+                                Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: modelData.name + " · " + (modelData.host || "local"); color: theme.ink; font.bold: true; wrapMode: Text.Wrap }
+                                Label { text: modelData.state; color: modelData.state === "Failed" || modelData.state === "Stop failed" || modelData.state === "Stop unconfirmed" ? theme.danger : modelData.state === "Connecting" || modelData.state === "Stopping" ? theme.warning : theme.accent }
+                                Label { text: modelData.exitCode >= 0 ? "exit " + modelData.exitCode : ""; color: theme.muted }
                             }
                             Flow {
                                 Layout.fillWidth: true
@@ -161,7 +162,7 @@ Rectangle {
                                 Layout.fillWidth: true
                                 implicitHeight: logLines.implicitHeight + 16
                                 visible: processCard.recentLines.length > 0
-                                color: "#101820"
+                                color: theme.canvas
                                 radius: 4
                                 clip: true
                                 ColumnLayout {
@@ -179,7 +180,7 @@ Rectangle {
                                             textFormat: Text.PlainText
                                             elide: Text.ElideRight
                                             font.family: "monospace"
-                                            color: "#c9d6dc"
+                                            color: theme.ink
                                         }
                                     }
                                 }

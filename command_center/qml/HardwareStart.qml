@@ -8,9 +8,9 @@ Rectangle {
     required property var workflow
     required property var sessionController
     required property var processManager
-    color: "#1b2933"
+    color: theme.surface
     radius: 12
-    border.color: "#2b3c47"
+    border.color: theme.line
 
     function saveOption(name, value) { workflow.setOption(name, value) }
     function boolOption(name) { return workflow.options[name] === undefined ? false : workflow.options[name] }
@@ -23,27 +23,27 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Label { text: "Hardware start"; color: "#f2f6f8"; font.pixelSize: 20; font.bold: true }
+            Label { text: "Hardware start"; color: theme.ink; font.pixelSize: 20; font.bold: true }
             Item { Layout.fillWidth: true }
             Rectangle {
                 radius: 10
-                color: workflow.state === "Ready" || workflow.state === "Accepted" ? "#17634f" :
-                       workflow.state === "Blocked" || workflow.state === "Failed" ? "#713b40" : "#69531f"
+                color: workflow.state === "Ready" || workflow.state === "Accepted" ? theme.selected :
+                       workflow.state === "Blocked" || workflow.state === "Failed" ? theme.dangerSurface : theme.warningSurface
                 implicitWidth: stateLabel.implicitWidth + 20
                 implicitHeight: stateLabel.implicitHeight + 10
-                Label { id: stateLabel; anchors.centerIn: parent; text: workflow.state; color: "white"; font.bold: true }
+                Label { id: stateLabel; anchors.centerIn: parent; text: workflow.state; color: theme.ink; font.bold: true }
             }
         }
         Label {
             Layout.fillWidth: true
             text: sessionController.mode + " · " + sessionController.target + " · " + sessionController.robot + " · domain " + sessionController.rosDomain
-            color: "#a8bac5"
+            color: theme.muted
             wrapMode: Text.WordWrap
         }
         Label {
             Layout.fillWidth: true
             text: "A confirmed preflight is required before launch. Unknown or missing UR safety state blocks the start. This app does not clear safety stops."
-            color: "#f0b44d"
+            color: theme.warning
             wrapMode: Text.WordWrap
         }
 
@@ -70,7 +70,7 @@ Rectangle {
                     CheckBox { text: "Launch MoveIt"; checked: root.boolOption("launch_moveit"); onToggled: root.saveOption("launch_moveit", checked) }
                 }
                 RowLayout {
-                    Label { text: "Localization for next start"; color: "#dce6eb" }
+                    Label { text: "Localization for next start"; color: theme.ink }
                     ComboBox {
                         id: localizationSource
                         enabled: root.boolOption("launch_mir")
@@ -81,13 +81,13 @@ Rectangle {
                         currentIndex: root.workflow.options.localization_source === "mocap" ? 1 : root.workflow.options.localization_source === "amcl" ? 2 : 0
                         onActivated: root.saveOption("localization_source", model[currentIndex].value)
                     }
-                    Label { text: root.workflow.localizationState; color: "#f0b44d" }
+                    Label { text: root.workflow.localizationState; color: theme.warning }
                     Button { text: "Prepare AMCL"; enabled: !root.workflow.busy && root.workflow.options.localization_source === "amcl" && root.sessionController.connectionState === "Connected"; onClicked: root.workflow.prepareAmcl() }
                 }
-                Label { Layout.fillWidth: true; text: "Active localization: " + root.workflow.activeLocalization; color: "#dce6eb"; wrapMode: Text.WordWrap }
-                Label { Layout.fillWidth: true; text: root.workflow.localizationDetail; color: "#a8bac5"; wrapMode: Text.WordWrap }
+                Label { Layout.fillWidth: true; text: "Active localization: " + root.workflow.activeLocalization; color: theme.ink; wrapMode: Text.WordWrap }
+                Label { Layout.fillWidth: true; text: root.workflow.localizationDetail; color: theme.muted; wrapMode: Text.WordWrap }
                 RowLayout {
-                    Label { text: "MoveIt speed: " + root.workflow.options.moveit_speed_percent + "%"; color: "#dce6eb" }
+                    Label { text: "MoveIt speed: " + root.workflow.options.moveit_speed_percent + "%"; color: theme.ink }
                     Slider {
                         Layout.fillWidth: true
                         from: 1; to: 100; stepSize: 1
@@ -96,7 +96,7 @@ Rectangle {
                     }
                 }
                 RowLayout {
-                    Label { text: "Remote workspace"; color: "#dce6eb" }
+                    Label { text: "Remote workspace"; color: theme.ink }
                     TextField {
                         Layout.fillWidth: true
                         text: root.workflow.options.remote_workspace
@@ -118,10 +118,10 @@ Rectangle {
             Layout.fillWidth: true
             Button { text: "Sync source…"; enabled: !root.workflow.busy && root.sessionController.connectionState === "Connected" && root.sessionController.workspacePath.length > 0; onClicked: syncDialog.open() }
             Button { text: "Build workspace"; enabled: !root.workflow.busy && root.sessionController.connectionState === "Connected"; onClicked: root.workflow.buildWorkspace() }
-            Label { Layout.fillWidth: true; text: "Sync and build are explicit, separate actions; launch does not run either implicitly."; color: "#a8bac5"; wrapMode: Text.WordWrap }
+            Label { Layout.fillWidth: true; text: "Sync and build are explicit, separate actions; launch does not run either implicitly."; color: theme.muted; wrapMode: Text.WordWrap }
         }
 
-        Label { Layout.fillWidth: true; text: root.workflow.message; color: root.workflow.state === "Blocked" || root.workflow.state === "Failed" ? "#f07178" : "#c9d6dc"; wrapMode: Text.WordWrap }
+        Label { Layout.fillWidth: true; text: root.workflow.message; color: root.workflow.state === "Blocked" || root.workflow.state === "Failed" ? theme.danger : theme.ink; wrapMode: Text.WordWrap }
         Repeater {
             model: root.workflow.checks
             delegate: Rectangle {
@@ -129,19 +129,19 @@ Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: checkRow.implicitHeight + 14
                 radius: 8
-                color: "#14212a"
+                color: theme.canvas
                 RowLayout {
                     id: checkRow
                     anchors.fill: parent; anchors.margins: 8; spacing: 10
                     Rectangle {
                         radius: 8; implicitWidth: state.implicitWidth + 16; implicitHeight: state.implicitHeight + 8
-                        color: modelData.state === "Ready" ? "#17634f" : modelData.state === "Blocked" ? "#713b40" : modelData.state === "Unknown" ? "#4b3f30" : "#69531f"
-                        Label { id: state; anchors.centerIn: parent; text: modelData.state; color: "white"; Accessible.name: modelData.state }
+                        color: modelData.state === "Ready" ? theme.selected : modelData.state === "Blocked" ? theme.dangerSurface : modelData.state === "Unknown" ? theme.warningSurface : theme.warningSurface
+                        Label { id: state; anchors.centerIn: parent; text: modelData.state; color: theme.ink; Accessible.name: modelData.state }
                     }
                     ColumnLayout {
                         Layout.fillWidth: true
-                        Label { text: modelData.name; color: "#f2f6f8"; font.bold: true }
-                        Label { Layout.fillWidth: true; text: modelData.detail; color: "#a8bac5"; wrapMode: Text.WordWrap }
+                        Label { text: modelData.name; color: theme.ink; font.bold: true }
+                        Label { Layout.fillWidth: true; text: modelData.detail; color: theme.muted; wrapMode: Text.WordWrap }
                     }
                 }
             }

@@ -8,9 +8,9 @@ Rectangle {
     required property var sessionController
     implicitWidth: 660
     implicitHeight: Math.max(300, controls.implicitHeight + 32)
-    color: "#1b2933"
+    color: theme.surface
     radius: 12
-    border.color: "#2b3c47"
+    border.color: theme.line
 
     ColumnLayout {
         id: controls
@@ -20,7 +20,7 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Label { text: "Lift"; color: "#f2f6f8"; font.pixelSize: 20; font.bold: true }
+            Label { text: "Lift"; color: theme.ink; font.pixelSize: 20; font.bold: true }
             ComboBox {
                 id: sideSelector
                 model: ["left", "right"]
@@ -31,7 +31,7 @@ Rectangle {
             Item { Layout.fillWidth: true }
             Label {
                 text: panel.sessionController.mode + " · " + panel.sessionController.robot
-                color: "#a8bac5"
+                color: theme.muted
             }
         }
 
@@ -41,13 +41,13 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 68
                 radius: 10
-                color: panel.controller.heightMeters > 0 ? "#243640" : "#3a3130"
+                color: panel.controller.heightMeters > 0 ? theme.raised : theme.warningSurface
                 ColumnLayout {
                     anchors.centerIn: parent
-                    Label { text: "CURRENT HEIGHT"; color: "#a8bac5"; font.pixelSize: 11; font.bold: true }
+                    Label { text: "CURRENT HEIGHT"; color: theme.muted; font.pixelSize: 11; font.bold: true }
                     Label {
                         text: panel.controller.ageSeconds < 0 ? "— m" : panel.controller.heightMeters.toFixed(3) + " m"
-                        color: "#f2f6f8"; font.pixelSize: 22; font.bold: true
+                        color: theme.ink; font.pixelSize: 22; font.bold: true
                         Accessible.name: "Lift height " + text
                     }
                 }
@@ -56,20 +56,20 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 68
                 radius: 10
-                color: "#243640"
+                color: theme.raised
                 ColumnLayout {
                     anchors.centerIn: parent
-                    Label { text: "DATA AGE"; color: "#a8bac5"; font.pixelSize: 11; font.bold: true }
+                    Label { text: "DATA AGE"; color: theme.muted; font.pixelSize: 11; font.bold: true }
                     Label {
                         text: panel.controller.ageSeconds < 0 ? "Not received" : panel.controller.ageSeconds.toFixed(1) + " s"
-                        color: panel.controller.ageSeconds > 2.0 ? "#ffb15b" : "#f2f6f8"
+                        color: panel.controller.ageSeconds > 2.0 ? theme.warning : theme.ink
                         font.pixelSize: 18; font.bold: true
                         Accessible.name: "Lift data age " + text
                     }
                 }
             }
             ColumnLayout {
-                Label { text: "STEP (m)"; color: "#a8bac5"; font.pixelSize: 11; font.bold: true }
+                Label { text: "STEP (m)"; color: theme.muted; font.pixelSize: 11; font.bold: true }
                 SpinBox {
                     id: stepSpin
                     from: 1; to: 50; value: Math.round(panel.controller.stepMeters * 1000)
@@ -85,8 +85,8 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Label { text: "Allowed range"; color: "#a8bac5" }
-            Label { text: "Min"; color: "#a8bac5" }
+            Label { text: "Allowed range"; color: theme.muted }
+            Label { text: "Min"; color: theme.muted }
             SpinBox {
                 id: minSpin
                 from: 5; to: 259; value: Math.round(panel.controller.minimumMeters * 1000)
@@ -96,7 +96,7 @@ Rectangle {
                 onValueModified: panel.controller.setLimits(value / 1000, maxSpin.value / 1000)
                 Accessible.name: "Lift minimum height in meters"
             }
-            Label { text: "Max"; color: "#a8bac5" }
+            Label { text: "Max"; color: theme.muted }
             SpinBox {
                 id: maxSpin
                 from: 6; to: 260; value: Math.round(panel.controller.maximumMeters * 1000)
@@ -137,7 +137,7 @@ Rectangle {
                 Layout.fillWidth: true
                 text: panel.controller.status
                 color: panel.controller.status.indexOf("Ready") === 0 || panel.controller.status.indexOf("Target sent") === 0
-                    ? "#45d6a8" : (panel.controller.status.indexOf("Stale") === 0 || panel.controller.status.indexOf("limit") >= 0 ? "#ffb15b" : "#a8bac5")
+                    ? theme.accent : (panel.controller.status.indexOf("Stale") === 0 || panel.controller.status.indexOf("limit") >= 0 ? theme.warning : theme.muted)
                 wrapMode: Text.WordWrap
                 Accessible.name: panel.controller.status
             }

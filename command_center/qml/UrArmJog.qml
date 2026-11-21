@@ -11,9 +11,9 @@ FocusScope {
 
     Rectangle {
         anchors.fill: parent
-        color: "#1b2933"
+        color: theme.surface
         radius: 12
-        border.color: "#2b3c47"
+        border.color: theme.line
     }
 
     ColumnLayout {
@@ -24,7 +24,7 @@ FocusScope {
 
         RowLayout {
             Layout.fillWidth: true
-            Label { text: "UR arm control"; color: "#f2f6f8"; font.pixelSize: 20; font.bold: true }
+            Label { text: "UR arm control"; color: theme.ink; font.pixelSize: 20; font.bold: true }
             Item { Layout.fillWidth: true }
             ComboBox {
                 id: sideChoice
@@ -38,7 +38,7 @@ FocusScope {
         Label {
             Layout.fillWidth: true
             text: controller ? controller.readiness : "No UR arm controller"
-            color: controller && controller.ready ? "#45d6a8" : "#f0b44d"
+            color: controller && controller.ready ? theme.accent : theme.warning
             font.family: "monospace"
             font.pixelSize: 13
             wrapMode: Text.WordWrap
@@ -49,7 +49,7 @@ FocusScope {
             spacing: 18
             ColumnLayout {
                 Layout.fillWidth: true
-                Label { text: "Translation ≤ 0.05 m/s"; color: "#a8bac5" }
+                Label { text: "Translation ≤ 0.05 m/s"; color: theme.muted }
                 Slider {
                     id: linear
                     Layout.fillWidth: true
@@ -59,7 +59,7 @@ FocusScope {
             }
             ColumnLayout {
                 Layout.fillWidth: true
-                Label { text: "Rotation ≤ 0.20 rad/s"; color: "#a8bac5" }
+                Label { text: "Rotation ≤ 0.20 rad/s"; color: theme.muted }
                 Slider {
                     id: angular
                     Layout.fillWidth: true
@@ -77,15 +77,15 @@ FocusScope {
                 onClicked: if (controller) controller.setArmed(!controller.armed)
                 Accessible.name: "Explicitly arm selected UR arm jog"
             }
-            Label { Layout.fillWidth: true; text: controller ? controller.status : ""; color: "#a8bac5"; wrapMode: Text.WordWrap }
+            Label { Layout.fillWidth: true; text: controller ? controller.status : ""; color: theme.muted; wrapMode: Text.WordWrap }
         }
 
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 52
             radius: 8
-            color: "#532c31"
-            border.color: "#f07178"
+            color: theme.dangerSurface
+            border.color: theme.danger
             Button {
                 anchors.fill: parent
                 text: controller ? "STOP · " + controller.selectedArm : "STOP ARM JOG"
@@ -94,7 +94,7 @@ FocusScope {
                 background: Rectangle { color: "transparent" }
                 contentItem: Text {
                     text: parent.text
-                    color: "#fff0f0"
+                    color: theme.ink
                     font.bold: true
                     font.pixelSize: 16
                     horizontalAlignment: Text.AlignHCenter
@@ -135,7 +135,7 @@ FocusScope {
         Label {
             Layout.fillWidth: true
             text: "Hold a direction to move. Releasing, losing focus, changing arms, or disconnecting stops the command. Only this arm is addressed."
-            color: "#a8bac5"
+            color: theme.muted
             wrapMode: Text.WordWrap
         }
         Timer {

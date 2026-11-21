@@ -10,9 +10,9 @@ Item {
     implicitHeight: Math.max(470, controls.implicitHeight + 36)
     focus: true
     activeFocusOnTab: true
-    property color panelColor: "#1b2933"
-    property color foreground: "#f2f6f8"
-    property color muted: "#a8bac5"
+    property color panelColor: theme.surface
+    property color foreground: theme.ink
+    property color muted: theme.muted
     property int heldKey: -1
 
     function directionForKey(key) {
@@ -83,7 +83,7 @@ Item {
         anchors.fill: parent
         color: panel.panelColor
         radius: 12
-        border.color: "#2b3c47"
+        border.color: theme.line
         ColumnLayout {
             id: controls
             anchors.fill: parent
@@ -151,10 +151,10 @@ Item {
             Label {
                 Layout.fillWidth: true
                 text: mirHardwareControl.status
-                color: mirHardwareControl.holding ? "#45d6a8" : panel.muted
+                color: mirHardwareControl.holding ? theme.accent : panel.muted
                 Accessible.name: mirHardwareControl.status
             }
-            Rectangle { Layout.fillWidth: true; height: 1; color: "#2b3c47" }
+            Rectangle { Layout.fillWidth: true; height: 1; color: theme.line }
             RowLayout {
                 Layout.fillWidth: true
                 Label { text: "Lights"; color: panel.foreground; font.bold: true }
@@ -166,7 +166,7 @@ Item {
             Label {
                 Layout.fillWidth: true
                 text: mirHardwareControl.lightStatus
-                color: mirHardwareControl.lightStatus.indexOf("Applied") === 0 ? "#45d6a8" : panel.muted
+                color: mirHardwareControl.lightStatus.indexOf("Applied") === 0 ? theme.accent : panel.muted
                 wrapMode: Text.WordWrap
                 Accessible.name: mirHardwareControl.lightStatus
             }
@@ -179,8 +179,8 @@ Item {
         width: 104
         height: 42
         radius: 8
-        color: holdArea.pressed ? "#397f80" : "#243640"
-        border.color: "#48616d"
+        color: holdArea.pressed ? theme.selectedLine : theme.raised
+        border.color: theme.line
         Label { anchors.centerIn: parent; text: parent.text; color: panel.foreground; font.bold: true }
         MouseArea {
             id: holdArea

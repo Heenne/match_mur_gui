@@ -29,6 +29,7 @@ find_package(ur_dashboard_msgs REQUIRED)
 
 add_executable(mur_command_center
   command_center/main.cpp
+  command_center/app_theme.cpp
   command_center/ros_session_monitor.cpp
   command_center/hardware_status.cpp
   command_center/hardware_status.hpp

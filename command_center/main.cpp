@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <QApplication>
+#include "app_theme.hpp"
 #include <QCursor>
 #include <QDockWidget>
 #include <QFileInfo>
@@ -14,6 +15,7 @@
 #include <QScrollArea>
 #include <QLabel>
 #include <QMainWindow>
+#include <QPlainTextEdit>
 #include <QQmlContext>
 #include <QQuickItem>
 #include <QQuickWidget>
@@ -1540,6 +1542,8 @@ public:
 
     auto * command_center = new QQuickWidget(this);
     command_center->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    command_center->rootContext()->setContextProperty("theme", app_theme::colors());
+    command_center->setClearColor(app_theme::colors().value("canvas").value<QColor>());
     command_center->rootContext()->setContextProperty("session", session_);
     command_center->rootContext()->setContextProperty("simBaseJog", sim_base_jog_);
     command_center->rootContext()->setContextProperty("goalsPoses", goals_poses_);
@@ -1996,7 +2000,7 @@ bool run_connection_error_layout_contract_test(const QString & qml_path, const Q
   if (!directory.isValid()) return false;
   const auto missing_config = directory.filePath(QString(190, 'x') + ".rviz");
   SessionController fixture;
-  if (!fixture.saveProfile("Missing RViz file", "Simulation", "localhost", "mur620d", "RViz",
+  if (!fixture.saveProfile("Local simulation", "Simulation", "localhost", "mur620d", "RViz",
     "", missing_config, 62)) return false;
   fixture.selectView("Overview");
 
@@ -2065,6 +2069,34 @@ bool run_connection_error_layout_contract_test(const QString & qml_path, const Q
   if (!logs_dock || (desktop_size.height() <= 540 && logs_dock->isVisible())) {
     qCritical("Unexpected startup log dock visibility");
     return false;
+  }
+  auto * log_output = logs_dock->findChild<QPlainTextEdit *>();
+  const auto & colors = app_theme::colors();
+  if (!log_output || log_output->palette().color(QPalette::Base) != colors.value("canvas").value<QColor>()) {
+    qCritical("The log dock does not use the Command Center canvas color");
+    return false;
+  }
+  const auto preview_directory = qEnvironmentVariable("MUR_COMMAND_CENTER_SCREENSHOTS");
+  if (!preview_directory.isEmpty()) {
+    const bool compact = desktop_size.height() <= 540;
+    if (!compact) {
+      auto * store = window.findChild<LogStore *>();
+      if (!store) return false;
+      store->append("Session", "INFO", "Local simulation selected · localhost · mur620d");
+      store->append("Session", "INFO", "Log dock ready · following incoming messages");
+      store->append("Diagnostics", "WARN", "ROS is disconnected. Use Connect when the graph is ready.");
+    } else {
+      session->selectView("Processes");
+    }
+    QEventLoop render_loop;
+    QTimer::singleShot(150, &render_loop, &QEventLoop::quit);
+    render_loop.exec();
+    const auto filename = QDir(preview_directory).filePath(compact ? "processes-compact.png" : "overview.png");
+    if (!window.grab().save(filename)) {
+      qCritical("Could not write screenshot: %s", qPrintable(filename));
+      return false;
+    }
+    session->selectView("Overview");
   }
   session->connectToTarget();
   if (!session->connectionState().startsWith("Failed:") ||
@@ -2166,7 +2198,9 @@ bool run_connection_error_layout_contract_test(const QString & qml_path, const Q
 
 int main(int argc, char ** argv)
 {
+  qputenv("QT_QUICK_CONTROLS_STYLE", "Fusion");
   QApplication app(argc, argv);
+  app_theme::apply(app);
   app.setApplicationName("MuR Command Center");
 
   QString config_path;

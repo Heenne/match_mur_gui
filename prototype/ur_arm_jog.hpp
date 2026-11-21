@@ -88,6 +88,7 @@ public:
   Q_INVOKABLE void setContext(const QString & robot, const QString & mode,
     const QString & sessionKey, bool connected);
   Q_INVOKABLE void selectArm(const QString & side);
+  void setMotionBlocked(bool blocked);
   Q_INVOKABLE void setArmed(bool armed);
   Q_INVOKABLE void setLinearSpeed(double speed);
   Q_INVOKABLE void setAngularSpeed(double speed);
@@ -117,6 +118,7 @@ private:
   QString status_{"Arm jog disarmed"};
   bool context_connected_{false};
   bool readiness_ok_{false};
+  bool motion_blocked_{false};
   bool armed_{false};
   bool holding_{false};
   double linear_speed_{0.01};

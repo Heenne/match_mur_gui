@@ -49,6 +49,8 @@ add_executable(mur_rviz_docking_prototype
   prototype/mocap_controller.hpp
   prototype/ur_arm_jog.cpp
   prototype/ur_arm_jog.hpp
+  prototype/ur_motion_actions.cpp
+  prototype/ur_motion_actions.hpp
 )
 target_compile_features(mur_rviz_docking_prototype PRIVATE cxx_std_17)
 target_link_libraries(mur_rviz_docking_prototype Qt5::Widgets Qt5::QuickWidgets Qt5::Network)
@@ -81,6 +83,8 @@ if(BUILD_TESTING)
   set_tests_properties(lift_controller_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME ur_arm_jog_behavior COMMAND mur_rviz_docking_prototype --contract-test-ur-arm-jog)
   set_tests_properties(ur_arm_jog_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_test(NAME ur_motion_actions_behavior COMMAND mur_rviz_docking_prototype --contract-test-ur-motion-actions)
+  set_tests_properties(ur_motion_actions_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME hardware_start_behavior COMMAND mur_rviz_docking_prototype --contract-test-hardware-start)
   set_tests_properties(hardware_start_behavior PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_test(NAME localization_source_selection COMMAND mur_rviz_docking_prototype --contract-test-localization-source)

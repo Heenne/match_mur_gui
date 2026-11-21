@@ -24,6 +24,8 @@ public:
   Q_INVOKABLE bool startRemoteSimulation(const QString & host, int ros_domain, const QString & robot);
   Q_INVOKABLE bool startRemoteHardware(const QString & host, int ros_domain, const QString & robot,
     const QString & remote_workspace, const QVariantMap & options);
+  bool startRemoteOwnedCommand(const QString & name, const QString & host, int ros_domain,
+    const QString & command, const QString & start_log);
   Q_INVOKABLE bool startGazeboView();
   Q_INVOKABLE bool startProcess(const QString & name, const QString & program,
     const QStringList & arguments);

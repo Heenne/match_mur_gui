@@ -45,6 +45,14 @@ bool run_ur_motion_actions_contract_test()
   adapter->state = {"Running", "Executing", -1};
   action.refresh();
   if (adapter->stops != 2 || !action.status().contains("readiness lost")) return false;
+  adapter->state = {"Stopped", "Cancelled", 130};
+  adapter->readiness.joint_state_fresh = true; action.refresh();
+  action.setShutdownInterlock([](const QString & robot, const QString & side) {
+    return robot == "mur620d" && side == "l";
+  });
+  if (action.startHome() || adapter->starts != 2) return false;
+  action.selectArm("r");
+  if (!action.startHome() || adapter->starts != 3) return false;
   return true;
 }
 

@@ -372,6 +372,15 @@ bool run_ur_arm_jog_contract_test()
   adapter->readiness.joint_state_fresh = false;
   waitForEvents(120);
   if (jog.armed() || jog.holding() || adapter->commands.back().twist != std::array<double, 6>{}) return false;
+  adapter->readiness.joint_state_fresh = true;
+  jog.setShutdownInterlock([](const QString & robot, const QString & side) {
+    return robot == "mur620b" && side == "l";
+  });
+  jog.setArmed(true);
+  if (jog.armed() || jog.press("tx+")) return false;
+  jog.selectArm("r"); jog.setArmed(true);
+  if (!jog.armed() || !jog.press("tx+")) return false;
+  jog.stop("test complete");
   return true;
 }
 

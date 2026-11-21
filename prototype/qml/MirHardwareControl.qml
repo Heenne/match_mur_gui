@@ -7,7 +7,7 @@ import QtQuick.Dialogs 1.3 as NativeDialogs
 Item {
     id: panel
     implicitWidth: 720
-    implicitHeight: 470
+    implicitHeight: Math.max(470, controls.implicitHeight + 36)
     focus: true
     activeFocusOnTab: true
     property color panelColor: "#1b2933"
@@ -85,6 +85,7 @@ Item {
         radius: 12
         border.color: "#2b3c47"
         ColumnLayout {
+            id: controls
             anchors.fill: parent
             anchors.margins: 18
             spacing: 10

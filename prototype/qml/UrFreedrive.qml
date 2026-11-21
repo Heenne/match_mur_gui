@@ -2,9 +2,11 @@ import QtQuick 2.12
 import QtQuick.Controls 2.5
 import QtQuick.Layouts 1.12
 Rectangle {
+    implicitHeight: controls.implicitHeight + 36
  property var controller
  color: "#1b2933"; radius: 12; border.color: "#2b3c47"
  ColumnLayout {
+     id: controls
   anchors.fill: parent; anchors.margins: 18
   RowLayout {
    Label { text: "Freedrive"; color: "#f2f6f8"; font.pixelSize: 20; font.bold: true }

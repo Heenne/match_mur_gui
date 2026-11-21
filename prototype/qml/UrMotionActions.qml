@@ -3,9 +3,11 @@ import QtQuick.Controls 2.5
 import QtQuick.Layouts 1.12
 
 Rectangle {
+    implicitHeight: controls.implicitHeight + 36
     property var controller
     color: "#1b2933"; radius: 12; border.color: "#2b3c47"
     ColumnLayout {
+        id: controls
         anchors.fill: parent; anchors.margins: 18; spacing: 8
         RowLayout {
             Layout.fillWidth: true

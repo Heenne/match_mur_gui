@@ -6,7 +6,7 @@
 
 #include "log_store.hpp"
 
-class QLabel;
+class QLineEdit;
 class QDockWidget;
 class LogPanel : public QWidget
 {
@@ -31,6 +31,6 @@ private:
   QTabWidget * panes_[2];
   QVector<QWidget *> pane_widgets_[2];
   QString selected_source_;
-  QLabel * session_label_{nullptr};
+  QLineEdit * session_label_{nullptr};
   QDockWidget * dock_{nullptr};
 };

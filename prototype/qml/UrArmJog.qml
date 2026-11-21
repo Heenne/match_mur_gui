@@ -3,6 +3,7 @@ import QtQuick.Controls 2.5
 import QtQuick.Layouts 1.12
 
 FocusScope {
+    implicitHeight: controls.implicitHeight + 36
     id: panel
     property var controller
     focus: true
@@ -16,6 +17,7 @@ FocusScope {
     }
 
     ColumnLayout {
+        id: controls
         anchors.fill: parent
         anchors.margins: 18
         spacing: 12

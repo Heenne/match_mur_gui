@@ -3,6 +3,7 @@ import QtQuick.Controls 2.5
 import QtQuick.Layouts 1.12
 
 Rectangle {
+    implicitHeight: controls.implicitHeight + 36
     id: root
     required property var processManager
     property bool waitingForSimulationServer: false
@@ -23,6 +24,7 @@ Rectangle {
     }
 
     ColumnLayout {
+        id: controls
         anchors.fill: parent
         anchors.margins: 18
         spacing: 12
@@ -36,7 +38,9 @@ Rectangle {
             color: "#a8bac5"
             wrapMode: Text.WordWrap
         }
-        RowLayout {
+        Flow {
+            Layout.fillWidth: true
+            spacing: 6
             Button {
                 text: root.isLocalTarget() ? "Start simulation" : "Start remote simulation"
                 enabled: session.mode === "Simulation"
@@ -89,6 +93,7 @@ Rectangle {
         ScrollView {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.minimumHeight: 160
             clip: true
             Column {
                 width: parent.width
@@ -107,11 +112,13 @@ Rectangle {
                             anchors.margins: 10
                             RowLayout {
                                 Layout.fillWidth: true
-                                Label { text: modelData.name; color: "#f2f6f8"; font.bold: true }
-                                Label { text: modelData.host.length ? "@ " + modelData.host : "local"; color: "#a8bac5" }
+                                Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: modelData.name + " · " + (modelData.host || "local"); color: "#f2f6f8"; font.bold: true; wrapMode: Text.Wrap }
                                 Label { text: modelData.state; color: modelData.state === "Failed" || modelData.state === "Stop failed" || modelData.state === "Stop unconfirmed" ? "#f07178" : modelData.state === "Connecting" || modelData.state === "Stopping" ? "#f0b44d" : "#45d6a8" }
                                 Label { text: modelData.exitCode >= 0 ? "exit " + modelData.exitCode : ""; color: "#a8bac5" }
-                                Item { Layout.fillWidth: true }
+                            }
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: 6
                                 Button { text: "Stop"; enabled: modelData.state === "Running" || modelData.state === "Starting" || modelData.state === "Connecting" || modelData.state === "Stop failed" || modelData.state === "Stop unconfirmed"; onClicked: root.processManager.stopProcess(modelData.name) }
                                 Button { text: "Open log"; onClicked: { logs.showSource(root.processManager.logSource(modelData.name)); logs.raiseDock() } }
                             }

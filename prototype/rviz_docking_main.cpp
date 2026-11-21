@@ -6,15 +6,18 @@
 #include <utility>
 
 #include <QApplication>
+#include <QCursor>
 #include <QDockWidget>
 #include <QFileInfo>
 #include <QFile>
 #include <QSaveFile>
+#include <QScrollArea>
 #include <QLabel>
 #include <QMainWindow>
 #include <QQmlContext>
 #include <QQuickItem>
 #include <QQuickWidget>
+#include <QQuickWindow>
 #include <QShortcut>
 #include <QSettings>
 #include <QJsonDocument>
@@ -33,6 +36,8 @@
 #include <QElapsedTimer>
 #include <QCoreApplication>
 #include <QEventLoop>
+#include <QScopeGuard>
+#include <QScreen>
 #include <cstdlib>
 
 #include "ament_index_cpp/get_package_share_directory.hpp"
@@ -1477,10 +1482,20 @@ bool run_remote_process_manager_contract_test()
   return false;
 }
 
+QScrollArea * dock_viewport(QWidget * content)
+{
+  auto * viewport = new QScrollArea;
+  viewport->setFrameShape(QFrame::NoFrame);
+  viewport->setWidgetResizable(true);
+  viewport->setWidget(content);
+  return viewport;
+}
+
 class PrototypeWindow : public QMainWindow
 {
 public:
-  PrototypeWindow(const QString & config_path, const QString & context, const QString & qml_path)
+  PrototypeWindow(const QString & config_path, const QString & context, const QString & qml_path,
+    const QSize & desktop_size)
   : QMainWindow(), context_(context), config_override_(config_path), session_(new SessionController()),
     sim_base_jog_adapter_(std::make_shared<RosSimBaseJogAdapter>()),
     sim_base_jog_(new SimulationBaseJog(sim_base_jog_adapter_, this)),
@@ -1496,8 +1511,9 @@ public:
     lift_controller_(new LiftController(lift_adapter_, this))
   {
     setWindowTitle(QString("MuR Command Center · %1").arg(context_));
-    resize(1440, 900);
-    setMinimumSize(840, 560);
+    const auto window_budget = (desktop_size - QSize(32, 48)).expandedTo(QSize(1, 1));
+    setMinimumSize(QSize(840, 460).boundedTo(window_budget));
+    resize(QSize(1440, 900).boundedTo(window_budget));
 
     auto * command_center = new QQuickWidget(this);
     command_center->setResizeMode(QQuickWidget::SizeRootObjectToView);
@@ -1630,13 +1646,15 @@ public:
 
     logs_dock_ = new QDockWidget("Logs · " + session_label(), this);
     logs_dock_->setObjectName("logsDock");
-    logs_dock_->setWidget(log_panel_);
+    logs_dock_->setWidget(dock_viewport(log_panel_));
     logs_dock_->setAllowedAreas(Qt::AllDockWidgetAreas);
     logs_dock_->setFeatures(QDockWidget::DockWidgetClosable |
       QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     log_panel_->setDock(logs_dock_);
     log_panel_->setSessionLabel(session_label());
     addDockWidget(Qt::BottomDockWidgetArea, logs_dock_);
+    resizeDocks({logs_dock_}, {qMin(220, height() / 3)}, Qt::Vertical);
+    if (height() < 620) logs_dock_->hide();
 
     statusBar()->showMessage(QString("%1 · %2 · Disconnected · No processes started")
       .arg(session_->target(), session_->robot()));
@@ -1799,15 +1817,16 @@ public:
       frame->initialize(rviz_node_);
       rviz_dock_ = new QDockWidget("Visualisierung · " + session_label(), this);
       rviz_dock_->setObjectName("rvizVisualizationDock");
-      rviz_dock_->setWidget(frame);
+      rviz_dock_->setWidget(dock_viewport(frame));
       rviz_dock_->setAllowedAreas(Qt::AllDockWidgetAreas);
       rviz_dock_->setFeatures(QDockWidget::DockWidgetClosable |
         QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
       addDockWidget(Qt::RightDockWidgetArea, rviz_dock_);
-      connect(rviz_dock_, &QDockWidget::visibilityChanged, this, [this](bool visible) {
-        if (visible) rviz_dock_->widget()->setFocus(Qt::OtherFocusReason);
+      connect(rviz_dock_, &QDockWidget::visibilityChanged, frame, [frame](bool visible) {
+        if (visible) frame->setFocus(Qt::OtherFocusReason);
       });
       frame->loadDisplayConfig(session_->rvizConfigPath(config_override_));
+      resizeDocks({rviz_dock_}, {width() / 3}, Qt::Horizontal);
       ros_spin_timer_.start(10);
       diagnosis_timer_.start(500);
       connected_context_ = pending_context_.isEmpty() ? session_context() : pending_context_;
@@ -1948,7 +1967,7 @@ private:
   QTimer diagnosis_timer_;
 };
 
-bool run_connection_error_layout_contract_test(const QString & qml_path)
+bool run_connection_error_layout_contract_test(const QString & qml_path, const QSize & desktop_size)
 {
   QTemporaryDir directory;
   if (!directory.isValid()) return false;
@@ -1956,48 +1975,135 @@ bool run_connection_error_layout_contract_test(const QString & qml_path)
   SessionController fixture;
   if (!fixture.saveProfile("Missing RViz file", "Simulation", "localhost", "mur620d", "RViz",
     "", missing_config, 62)) return false;
+  fixture.selectView("Overview");
 
-  PrototypeWindow window("", "Layout check", qml_path);
+  PrototypeWindow window("", "Layout check", qml_path, desktop_size);
   window.show();
+  if (window.width() > desktop_size.width() || window.height() > desktop_size.height()) {
+    qCritical("Startup window %dx%d exceeds desktop %dx%d", window.width(), window.height(),
+      desktop_size.width(), desktop_size.height());
+    return false;
+  }
   auto * view = qobject_cast<QQuickWidget *>(window.centralWidget());
   if (!view || !view->rootObject()) return false;
+  const auto unload = qScopeGuard([view]() { view->setSource(QUrl()); });
   auto * session = qobject_cast<SessionController *>(view->rootContext()->contextProperty("session").value<QObject *>());
   if (!session) return false;
   const QStringList pages{"Overview", "Visualization", "Robot", "Processes", "Diagnosis", "Logs", "Settings", "Mocap"};
-  const auto find_button = [](auto & self, QQuickItem * item, const QString & text) -> QQuickItem * {
-    if (item->property("checkable").toBool() && item->property("text").toString() == text) return item;
+  const auto find_item = [](auto & self, QQuickItem * item, const auto & matches) -> QQuickItem * {
+    if (matches(item)) return item;
     for (auto * child : item->childItems()) {
-      if (auto * button = self(self, child, text)) return button;
+      if (auto * found = self(self, child, matches)) return found;
     }
     return nullptr;
   };
-  const auto navigation_fits = [&]() {
+  const auto find_button = [&](const QString & text) {
+    return find_item(find_item, view->quickWindow()->contentItem(), [&](auto * item) {
+      return item->isVisible() && item->property("text").toString() == text &&
+        item->metaObject()->indexOfSignal("clicked()") >= 0;
+    });
+  };
+  const auto fits = [&](QQuickItem * item) {
     auto * root = view->rootObject();
+    return item && item->isVisible() && item->isEnabled() &&
+      root->boundingRect().contains(item->mapRectToItem(root, item->boundingRect()));
+  };
+  const auto reach_button = [&](const QString & text) -> QQuickItem * {
+    QCoreApplication::processEvents();
+    auto * button = find_button(text);
+    if (button && !fits(button)) {
+      button->forceActiveFocus(Qt::TabFocusReason);
+      QCoreApplication::processEvents();
+    }
+    return fits(button) ? button : nullptr;
+  };
+  const auto header_fits = [&]() {
+    if (!fits(find_button("Connect")) || !fits(find_button("New preset"))) {
+      qCritical("Connect or New preset is outside the visible window");
+      return false;
+    }
     for (const auto & page : pages) {
-      auto * button = find_button(find_button, root, page);
-      if (!button || !button->isVisible() || !button->isEnabled() ||
-        !root->boundingRect().contains(button->mapRectToItem(root, button->boundingRect()))) {
+      if (!fits(find_button(page))) {
         qCritical("Navigation button '%s' is outside the visible window", qPrintable(page));
+        return false;
+      }
+    }
+    for (const auto * name : {"modeSelector", "presetSelector", "targetSelector", "robotSelector"}) {
+      if (!fits(view->rootObject()->findChild<QQuickItem *>(name))) {
+        qCritical("Session control '%s' is outside the visible window", name);
         return false;
       }
     }
     return true;
   };
   QCoreApplication::processEvents();
-  if (!navigation_fits()) return false;
+  if (!header_fits()) return false;
+  auto * logs_dock = window.findChild<QDockWidget *>("logsDock");
+  if (!logs_dock || (desktop_size.height() <= 540 && logs_dock->isVisible())) {
+    qCritical("Unexpected startup log dock visibility");
+    return false;
+  }
   session->connectToTarget();
   if (!session->connectionState().startsWith("Failed:") ||
     !session->connectionState().contains(missing_config) || rclcpp::ok()) return false;
   QCoreApplication::processEvents();
-  if (!navigation_fits()) return false;
-  window.resize(840, 560);
-  QCoreApplication::processEvents();
-  if (!navigation_fits()) return false;
+  if (!header_fits()) return false;
   for (const auto & page : pages) {
-    auto * button = find_button(find_button, view->rootObject(), page);
-    if (!QMetaObject::invokeMethod(button, "clicked") || session->view() != page) return false;
+    auto * button = find_button(page);
+    if (!QMetaObject::invokeMethod(button, "clicked") || session->view() != page) {
+      qCritical("Couldn't open '%s' from the navigation", qPrintable(page));
+      return false;
+    }
   }
-  return true;
+  session->selectView("Logs");
+  auto * open_logs = reach_button("Open log dock");
+  if (!open_logs || !QMetaObject::invokeMethod(open_logs, "clicked")) {
+    qCritical("Couldn't open the log dock from the Logs page");
+    return false;
+  }
+  QCoreApplication::processEvents();
+  if (auto * workspace = view->rootObject()->findChild<QQuickItem *>("workspaceViewport")) {
+    workspace->setProperty("contentY", 0);
+  }
+  if (!logs_dock->isVisible() || logs_dock->height() > window.height() / 2 || !header_fits()) {
+    qCritical("The log dock (%d px high) does not fit in the %d px window",
+      logs_dock->height(), window.height());
+    return false;
+  }
+  logs_dock->hide();
+  QCoreApplication::processEvents();
+  if (desktop_size.height() <= 540) {
+    session->selectView("Mocap");
+    QCoreApplication::processEvents();
+    auto * page = find_item(find_item, view->rootObject(), [](auto * item) {
+      return item->objectName() == "mocapPage";
+    });
+    auto * control = find_button("Freeze localization");
+    if (!page || !control || page->property("contentHeight").toReal() <= page->height()) {
+      qCritical("Expected scrollable Mocap controls on the compact desktop");
+      return false;
+    }
+    const auto button_center = control->mapRectToItem(page, control->boundingRect()).center().y();
+    const auto max_scroll = page->property("contentHeight").toReal() - page->height();
+    page->setProperty("contentY", qBound(0.0, button_center - page->height() / 2, max_scroll));
+    QCoreApplication::processEvents();
+    if (!page->boundingRect().contains(control->mapRectToItem(page, control->boundingRect()))) {
+      qCritical("The Mocap control cannot be reached by scrolling");
+      return false;
+    }
+  }
+  session->selectView("Settings");
+  auto * edit = reach_button("Edit profile");
+  if (!edit || !QMetaObject::invokeMethod(edit, "clicked")) {
+    qCritical("Couldn't open Edit profile from Settings");
+    return false;
+  }
+  QCoreApplication::processEvents();
+  if (!fits(find_button("Save profile")) || !fits(find_button("Cancel"))) {
+    qCritical("Profile dialog actions are outside the visible window");
+    return false;
+  }
+  return QMetaObject::invokeMethod(find_button("Cancel"), "clicked");
 }
 }
 
@@ -2099,6 +2205,7 @@ int main(int argc, char ** argv)
     contract_config = std::make_unique<QTemporaryDir>();
     if (!contract_config->isValid() ||
       !qputenv("XDG_CONFIG_HOME", contract_config->path().toLocal8Bit()) ||
+      !qputenv("XDG_DATA_HOME", contract_config->filePath("data").toLocal8Bit()) ||
       !qputenv("MUR_COMMAND_CENTER_SETTINGS", contract_config->filePath("session.ini").toLocal8Bit())) {
       qCritical("Could not isolate command center contract test settings");
       return 1;
@@ -2180,7 +2287,9 @@ int main(int argc, char ** argv)
     return 0;
   }
   if (arguments.contains("--contract-test-connection-error-layout")) {
-    return run_connection_error_layout_contract_test(qml_path) ? 0 : 1;
+    // 1080p work areas with space reserved for the taskbar, at 100% and 200% scaling.
+    return run_connection_error_layout_contract_test(qml_path, QSize(1920, 1040)) &&
+      run_connection_error_layout_contract_test(qml_path, QSize(960, 500)) ? 0 : 1;
   }
   if (arguments.contains("--contract-test-sim-base-jog")) {
     if (!run_sim_base_jog_contract_test()) {
@@ -2266,7 +2375,11 @@ int main(int argc, char ** argv)
     qInfo("Log store contract passed");
     return 0;
   }
-  PrototypeWindow window(config_path, context, qml_path);
+  auto * screen = app.screenAt(QCursor::pos());
+  if (!screen) screen = app.primaryScreen();
+  const auto desktop = screen->availableGeometry();
+  PrototypeWindow window(config_path, context, qml_path, desktop.size());
+  window.move(desktop.center() - QPoint(window.width() / 2, window.height() / 2));
   window.show();
   const int result = app.exec();
   if (rclcpp::ok()) rclcpp::shutdown();

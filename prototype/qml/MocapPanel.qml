@@ -3,6 +3,7 @@ import QtQuick.Controls 2.5
 import QtQuick.Layouts 1.12
 
 Rectangle {
+    implicitHeight: controls.implicitHeight + 40
     id: root
     required property var controller
     required property var sessionController
@@ -11,6 +12,7 @@ Rectangle {
     border.color: "#2b3c47"
 
     ColumnLayout {
+        id: controls
         anchors.fill: parent
         anchors.margins: 20
         spacing: 14
@@ -44,8 +46,9 @@ Rectangle {
 
         Rectangle { Layout.fillWidth: true; height: 1; color: "#354752" }
         Label { text: "Bridge connection"; color: "#f2f6f8"; font.pixelSize: 17; font.bold: true }
-        RowLayout {
+        GridLayout {
             Layout.fillWidth: true
+            columns: width < 540 ? 2 : 4
             TextField { id: sshHost; Layout.fillWidth: true; text: root.controller.sshHost; placeholderText: "SSH host"; Accessible.name: "Qualisys SSH host" }
             TextField { id: qtmHost; Layout.fillWidth: true; text: root.controller.qtmHost; placeholderText: "QTM host"; Accessible.name: "QTM host" }
             TextField {
@@ -58,7 +61,9 @@ Rectangle {
             }
             Button { text: "Save"; onClicked: root.controller.setBridgeSettings(sshHost.text, qtmHost.text, Number(qtmPort.text)) }
         }
-        RowLayout {
+        Flow {
+            Layout.fillWidth: true
+            spacing: 6
             Button {
                 text: "Start bridge"
                 enabled: root.sessionController.connectionState === "Connected" && root.controller.bridgeState === "Stopped"

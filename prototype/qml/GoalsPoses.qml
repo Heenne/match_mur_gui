@@ -8,8 +8,9 @@ Rectangle {
     required property var goals
     required property var sessionController
     color: "#1b2933"; radius: 12; border.color: "#2b3c47"
-    implicitHeight: 440
+    implicitHeight: Math.max(440, controls.implicitHeight + 36)
     ColumnLayout {
+        id: controls
         anchors.fill: parent; anchors.margins: 18; spacing: 10
         Label { text: "Goals and saved poses"; color: "#f2f6f8"; font.pixelSize: 20; font.bold: true }
         Label { Layout.fillWidth: true; text: goals.adapterStatus(sessionController.robot, sessionController.mode); color: "#a8bac5"; wrapMode: Text.WordWrap }

@@ -3,6 +3,7 @@ import QtQuick.Controls 2.5
 import QtQuick.Layouts 1.12
 
 Rectangle {
+    implicitHeight: controls.implicitHeight + 36
     id: root
     required property var workflow
     required property var sessionController
@@ -15,6 +16,7 @@ Rectangle {
     function boolOption(name) { return workflow.options[name] === undefined ? false : workflow.options[name] }
 
     ColumnLayout {
+        id: controls
         anchors.fill: parent
         anchors.margins: 18
         spacing: 12
@@ -154,30 +156,16 @@ Rectangle {
         return "Stopped"
     }
 
-    Dialog {
+    AdaptiveMessageDialog {
         id: startDialog
-        modal: true
-        width: 520
         title: "Start hardware?"
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label {
-            width: 480
-            text: "Start only the selected components on " + root.sessionController.target + " for " + root.sessionController.robot + "? The app will not clear any UR safety stop."
-            color: "#f2f6f8"; wrapMode: Text.WordWrap; padding: 18
-        }
+        message: "Start only the selected components on " + root.sessionController.target + " for " + root.sessionController.robot + "? The app will not clear any UR safety stop."
         onAccepted: root.workflow.startHardware()
     }
-    Dialog {
+    AdaptiveMessageDialog {
         id: syncDialog
-        modal: true
-        width: 520
         title: "Synchronize source?"
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label {
-            width: 480
-            text: "Copy source files from " + root.sessionController.workspacePath + "/src to " + root.sessionController.target + ":" + root.workflow.options.remote_workspace + "/src. Existing matching remote files may be overwritten; remote-only files are preserved."
-            color: "#f2f6f8"; wrapMode: Text.WordWrap; padding: 18
-        }
+        message: "Copy source files from " + root.sessionController.workspacePath + "/src to " + root.sessionController.target + ":" + root.workflow.options.remote_workspace + "/src. Existing matching remote files may be overwritten; remote-only files are preserved."
         onAccepted: root.workflow.syncSource()
     }
 }

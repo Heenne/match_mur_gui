@@ -7,12 +7,13 @@ Rectangle {
     required property var controller
     required property var sessionController
     implicitWidth: 660
-    implicitHeight: 300
+    implicitHeight: Math.max(300, controls.implicitHeight + 32)
     color: "#1b2933"
     radius: 12
     border.color: "#2b3c47"
 
     ColumnLayout {
+        id: controls
         anchors.fill: parent
         anchors.margins: 16
         spacing: 12

@@ -6,7 +6,7 @@ import QtQuick.Window 2.15
 Item {
     id: panel
     implicitWidth: 520
-    implicitHeight: 390
+    implicitHeight: Math.max(390, controls.implicitHeight + 36)
     focus: true
     activeFocusOnTab: true
     property color panelColor: "#1b2933"
@@ -86,6 +86,7 @@ Item {
         radius: 12
         border.color: "#2b3c47"
         ColumnLayout {
+            id: controls
             anchors.fill: parent
             anchors.margins: 18
             spacing: 12

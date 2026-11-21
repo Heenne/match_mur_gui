@@ -1,16 +1,20 @@
 #include "log_panel.hpp"
 
-#include <QCheckBox>
+#include <QAction>
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
-#include <QLabel>
 #include <QLineEdit>
+#include <QMainWindow>
 #include <QMap>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QSizePolicy>
+#include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 namespace
@@ -26,12 +30,22 @@ public:
     search_ = new QLineEdit(this);
     search_->setPlaceholderText("Search this log");
     filters->addWidget(search_, 1);
+    auto * severity = new QToolButton(this);
+    severity->setText("Severity");
+    severity->setPopupMode(QToolButton::InstantPopup);
+    auto * severity_menu = new QMenu(severity);
+    severity->setMenu(severity_menu);
+    filters->addWidget(severity);
     for (const auto & level : {QString("DEBUG"), QString("INFO"), QString("WARN"), QString("ERROR"), QString("FATAL")}) {
-      auto * check = new QCheckBox(level, this);
+      auto * check = severity_menu->addAction(level);
+      check->setCheckable(true);
       check->setChecked(true);
       levels_.insert(level, check);
-      filters->addWidget(check);
-      QObject::connect(check, &QCheckBox::toggled, this, [this]() { render(); });
+      QObject::connect(check, &QAction::toggled, this, [this, severity]() {
+        const auto count = selectedLevels().size();
+        severity->setText(count == levels_.size() ? "Severity" : QString("Severity (%1)").arg(count));
+        render();
+      });
     }
     QObject::connect(search_, &QLineEdit::textChanged, this, [this]() { render(); });
     layout->addLayout(filters);
@@ -68,7 +82,7 @@ private:
   QString source_;
   QLineEdit * search_{};
   QPlainTextEdit * output_{};
-  QMap<QString, QCheckBox *> levels_;
+  QMap<QString, QAction *> levels_;
 };
 }
 
@@ -76,12 +90,12 @@ LogPanel::LogPanel(LogStore * store, QWidget * parent) : QWidget(parent), store_
 {
   auto * root = new QVBoxLayout(this);
   auto * toolbar = new QHBoxLayout;
-  session_label_ = new QLabel("Session log", this);
-  toolbar->addWidget(session_label_);
-  auto * path = new QLabel(store_->filePath(), this);
-  path->setTextInteractionFlags(Qt::TextSelectableByMouse);
-  path->setToolTip(store_->filePath());
-  toolbar->addWidget(path, 1);
+  session_label_ = new QLineEdit(this);
+  session_label_->setReadOnly(true);
+  session_label_->setFrame(false);
+  session_label_->setAccessibleName("Session log location");
+  session_label_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+  toolbar->addWidget(session_label_, 1);
   auto * full = new QPushButton("Export full recording…", this);
   auto * filtered = new QPushButton("Export left filtered view…", this);
   toolbar->addWidget(full);
@@ -92,6 +106,8 @@ LogPanel::LogPanel(LogStore * store, QWidget * parent) : QWidget(parent), store_
   for (int index = 0; index < 2; ++index) {
     panes_[index] = new QTabWidget(this);
     panes_[index]->setTabsClosable(false);
+    panes_[index]->setUsesScrollButtons(true);
+    panes_[index]->setElideMode(Qt::ElideRight);
     split->addWidget(panes_[index], 1);
     connect(panes_[index], &QTabWidget::currentChanged, this, [this, index](int) {
       if (index == 0) selected_source_ = selectedSource();
@@ -125,12 +141,28 @@ void LogPanel::showSource(const QString & source)
 
 void LogPanel::raiseDock()
 {
-  if (dock_) { dock_->show(); dock_->raise(); }
+  if (!dock_) return;
+  const bool was_hidden = dock_->isHidden();
+  dock_->show();
+  dock_->raise();
+  if (was_hidden && !dock_->isFloating()) {
+    if (auto * window = qobject_cast<QMainWindow *>(dock_->parentWidget())) {
+      auto area = window->dockWidgetArea(dock_);
+      if (area == Qt::TopDockWidgetArea || area == Qt::BottomDockWidgetArea) {
+        QTimer::singleShot(0, dock_, [window, dock = dock_]() {
+          window->resizeDocks({dock}, {qMin(220, window->height() / 3)}, Qt::Vertical);
+        });
+      }
+    }
+  }
 }
 
 void LogPanel::setSessionLabel(const QString & label)
 {
-  session_label_->setText("Full session log · " + label);
+  const auto description = "Full session log · " + label + " · " + store_->filePath();
+  session_label_->setText(description);
+  session_label_->setCursorPosition(0);
+  session_label_->setToolTip(description);
 }
 
 void LogPanel::refreshSources()

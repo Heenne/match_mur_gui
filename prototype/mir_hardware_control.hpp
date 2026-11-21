@@ -97,6 +97,7 @@ private slots:
   void tick();
 
 private:
+  bool selectEndpoint();
   bool send(double linear_x, double angular_z);
   void callLight(const QString & suffix, const QString & type, bool solid,
     int red = 0, int green = 0, int blue = 0);
@@ -115,6 +116,8 @@ private:
   bool context_connected_{false};
   bool armed_{false};
   bool holding_{false};
+  std::string command_topic_;
+  bool command_stamped_{false};
   double linear_x_{0.0};
   double angular_z_{0.0};
   double linear_speed_{0.05};

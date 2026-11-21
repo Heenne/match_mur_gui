@@ -374,13 +374,15 @@ void ProcessManager::stopProcess(const QString & name)
   const auto pid = static_cast<pid_t>(managed->process->processId());
   if (pid > 1) ::kill(-pid, SIGINT);
   setState(managed, "Stopping");
-  QTimer::singleShot(8000, this, [this, managed]() {
-    if (managed->process->state() == QProcess::NotRunning) return;
-    const auto pid = static_cast<pid_t>(managed->process->processId());
-    if (pid > 1) ::kill(-pid, SIGTERM);
-    QTimer::singleShot(2000, this, [managed]() {
-      const auto pid = static_cast<pid_t>(managed->process->processId());
-      if (managed->process->state() != QProcess::NotRunning && pid > 1) ::kill(-pid, SIGKILL);
+  const auto run_number = managed->run_number;
+  QTimer::singleShot(8000, this, [this, managed, pid, run_number]() {
+    if (managed->run_number != run_number || !managed->stopping || pid <= 1 ||
+      managed->process->state() == QProcess::NotRunning || managed->process->processId() != pid) return;
+    ::kill(-pid, SIGTERM);
+    QTimer::singleShot(2000, this, [managed, pid, run_number]() {
+      if (managed->run_number == run_number && managed->stopping &&
+        managed->process->state() != QProcess::NotRunning && managed->process->processId() == pid)
+        ::kill(-pid, SIGKILL);
     });
   });
 }

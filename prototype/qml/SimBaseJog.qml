@@ -22,6 +22,10 @@ Item {
         return ""
     }
 
+    onActiveFocusChanged: {
+        if (!activeFocus && heldKey !== -1) stopJog("keyboard focus lost")
+    }
+
     Keys.onPressed: {
         if (event.key === Qt.Key_Space || event.key === Qt.Key_Escape) {
             panel.heldKey = -1

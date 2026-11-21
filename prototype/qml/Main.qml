@@ -91,7 +91,23 @@ Item {
         StackLayout {
             Layout.fillWidth: true; Layout.fillHeight: true
             currentIndex: Math.max(0, window.pages.indexOf(session.view))
-            Panel { heading: "Overview" }
+            Rectangle {
+                color: "#1b2933"; radius: 12; border.color: "#2b3c47"
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 18; spacing: 12
+                    Label { text: "Overview"; color: window.foreground; font.pixelSize: 20; font.bold: true }
+                    Label { text: session.mode + " · " + session.preset + " · " + session.target + " · domain " + session.rosDomain + " · " + session.robot; color: window.muted }
+                    Label { text: "Connection: " + session.connectionState; color: window.foreground }
+                    Label { text: "Managed processes"; color: window.foreground; font.bold: true }
+                    Label { visible: processes.processes.length === 0; text: "No managed processes"; color: window.muted }
+                    Repeater {
+                        model: processes.processes
+                        delegate: Label { required property var modelData; text: modelData.name + " · " + modelData.state + (modelData.host ? " · " + modelData.host : ""); color: window.foreground }
+                    }
+                    Label { visible: session.lastError.length > 0; text: session.lastError; color: "#ff9b8e"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    Item { Layout.fillHeight: true }
+                }
+            }
             Panel { heading: "Visualization" }
             Rectangle {
                 color: "transparent"
@@ -172,7 +188,7 @@ Item {
             }
             Panels.MocapPanel { controller: mocap; sessionController: session }
         }
-        Label { text: "Disconnected · status is shown by text and color"; color: "#f0b44d"; Accessible.name: "Disconnected" }
+        Label { text: session.connectionState + " · " + session.target; color: window.statusColor(session.connectionState); Accessible.name: text }
     }
     Dialog {
         id: presetDialog; title: "Create preset"; modal: true; standardButtons: Dialog.Ok | Dialog.Cancel

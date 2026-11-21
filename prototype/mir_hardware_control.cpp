@@ -294,7 +294,7 @@ bool MirHardwareControl::press(const QString & direction)
   else if (direction == "left") { linear_x_ = 0.0; angular_z_ = angular_speed_; }
   else if (direction == "right") { linear_x_ = 0.0; angular_z_ = -angular_speed_; }
   else return false;
-  if (!send(linear_x_, angular_z_)) {
+  if (!selectEndpoint() || !send(linear_x_, angular_z_)) {
     clearHold();
     setStatus(QString("Unavailable · no compatible Twist subscriber on %1/cmd_vel or %1/cmd_vel_stamped")
       .arg(QString::fromStdString("/" + robot_.toStdString())));
@@ -331,32 +331,45 @@ void MirHardwareControl::tick()
   if (!holding_) { timer_.stop(); return; }
   if (!armed_ || !context_connected_ || !hardware_mode_ || !adapter_ ||
     !adapter_->connected() || !send(linear_x_, angular_z_)) {
+    if (adapter_ && adapter_->connected() && !command_topic_.empty()) {
+      try { adapter_->publishTwist(command_topic_, command_stamped_, frameFor(robot_), 0.0, 0.0); }
+      catch (const std::exception &) {}
+    }
     clearHold();
-    setStatus("Stopped · selected hardware graph or verified MiR command endpoint was lost");
+    armed_ = false;
+    setStatus("Stopped and disarmed · selected hardware graph or verified MiR command endpoint was lost");
     emit changed();
   }
 }
 
-bool MirHardwareControl::send(double linear_x, double angular_z)
+bool MirHardwareControl::selectEndpoint()
 {
+  command_topic_.clear();
   if (!adapter_ || !adapter_->connected() || robot_.isEmpty()) return false;
   try {
-    const auto plain_topic = topicFor(robot_, "cmd_vel");
-    const auto plain = adapter_->inspectTopic(plain_topic);
-    if (plain.type == kTwistType && plain.subscribers > 0) {
-      adapter_->publishTwist(plain_topic, false, frameFor(robot_), linear_x, angular_z);
-      return true;
-    }
-    const auto stamped_topic = topicFor(robot_, "cmd_vel_stamped");
-    const auto stamped = adapter_->inspectTopic(stamped_topic);
-    if (stamped.type == kTwistStampedType && stamped.subscribers > 0) {
-      adapter_->publishTwist(stamped_topic, true, frameFor(robot_), linear_x, angular_z);
-      return true;
-    }
-  } catch (const std::exception &) {
-    return false;
-  }
-  return false;
+    const auto plain = topicFor(robot_, "cmd_vel");
+    const auto stamped = topicFor(robot_, "cmd_vel_stamped");
+    const auto plain_endpoint = adapter_->inspectTopic(plain);
+    const auto stamped_endpoint = adapter_->inspectTopic(stamped);
+    const bool plain_ok = plain_endpoint.type == kTwistType && plain_endpoint.subscribers > 0;
+    const bool stamped_ok = stamped_endpoint.type == kTwistStampedType && stamped_endpoint.subscribers > 0;
+    if (plain_ok == stamped_ok) return false;
+    command_stamped_ = stamped_ok;
+    command_topic_ = stamped_ok ? stamped : plain;
+    return true;
+  } catch (const std::exception &) { return false; }
+}
+
+bool MirHardwareControl::send(double linear_x, double angular_z)
+{
+  if (!adapter_ || !adapter_->connected() || command_topic_.empty()) return false;
+  try {
+    const auto endpoint = adapter_->inspectTopic(command_topic_);
+    if (endpoint.type != (command_stamped_ ? kTwistStampedType : kTwistType) ||
+      endpoint.subscribers == 0) return false;
+    adapter_->publishTwist(command_topic_, command_stamped_, frameFor(robot_), linear_x, angular_z);
+    return true;
+  } catch (const std::exception &) { return false; }
 }
 
 void MirHardwareControl::rainbowStart()
@@ -458,8 +471,12 @@ bool run_mir_hardware_control_contract_test()
     adapter->commands.back().linear == kMaxLinearMps);
   waitForEvents(120);
   VERIFY_MIR(adapter->commands.size() >= 2 && adapter->commands.back().linear == kMaxLinearMps);
-  control.release();
-  VERIFY_MIR(!control.holding() && adapter->commands.back().linear == 0.0 && adapter->commands.back().angular == 0.0);
+  adapter->topics["/mur620d/cmd_vel_stamped"] = {kTwistStampedType, 1};
+  adapter->topics.erase("/mur620d/cmd_vel");
+  waitForEvents(120);
+  VERIFY_MIR(!control.holding() && !control.armed() &&
+    adapter->commands.back().name == "/mur620d/cmd_vel" && adapter->commands.back().linear == 0.0);
+  control.setArmed(true);
 
   adapter->topics.erase("/mur620d/cmd_vel");
   adapter->topics["/mur620d/cmd_vel_stamped"] = {kTwistStampedType, 1};

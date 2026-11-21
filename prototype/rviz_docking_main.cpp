@@ -1408,6 +1408,12 @@ public:
     };
     connect(motion_actions_, &UrMotionActions::changed, this, update_interlock);
     connect(freedrive_, &UrFreedrive::changed, this, update_interlock);
+    connect(freedrive_, &UrFreedrive::changed, this, [this]() {
+      if (pending_disconnect_ && !freedrive_->busy()) {
+        pending_disconnect_ = false;
+        QTimer::singleShot(0, this, [this]() { disconnect_ros(); if (pending_close_) { pending_close_ = false; close(); } });
+      }
+    });
     command_center->rootContext()->setContextProperty("urFreedrive", freedrive_);
     command_center->rootContext()->setContextProperty("urMotionActions", motion_actions_);
     command_center->rootContext()->setContextProperty("processes", process_manager_);
@@ -1544,6 +1550,7 @@ public:
     }
     if (rviz_node_ && !connected_context_.isEmpty() && connected_context_ != session_context()) {
       const auto old_context = connected_context_;
+      if (freedrive_->busy()) { disconnect_ros(); return false; }
       disconnect_ros();
       session_->setDiagnostics({"Session context changed · RViz disconnected; connect to attach the selected profile",
         QString("Previous RViz context: %1").arg(old_context)});
@@ -1685,6 +1692,11 @@ public:
 
   void disconnect_ros()
   {
+    if (freedrive_ && freedrive_->busy()) {
+      pending_disconnect_ = true;
+      freedrive_->leave();
+      return;
+    }
     sim_base_jog_->stop("ROS disconnected");
     freedrive_->leave();
     freedrive_adapter_->setNode({});
@@ -1723,6 +1735,13 @@ public:
 protected:
   void closeEvent(QCloseEvent * event) override
   {
+    if (freedrive_ && freedrive_->busy()) {
+      pending_close_ = true;
+      pending_disconnect_ = true;
+      freedrive_->leave();
+      event->ignore();
+      return;
+    }
     sim_base_jog_->stop("window closed");
     freedrive_->leave();
     ur_arm_jog_->stop("window closed");
@@ -1736,6 +1755,8 @@ protected:
 private:
   QString context_;
   QString config_override_;
+  bool pending_disconnect_{false};
+  bool pending_close_{false};
   QString pending_context_;
   QString connected_context_;
   SessionController * session_;

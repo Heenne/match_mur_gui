@@ -41,6 +41,7 @@ signals:
   void changed();
 private:
   enum State { Idle, Entering, WaitingEndpoint, Active, Leaving, Unconfirmed };
+  void applyPendingContext();
   std::shared_ptr<UrFreedriveAdapter> adapter_;
   UrArmJog * jog_{};
   UrMotionActions * motion_{};
@@ -49,6 +50,8 @@ private:
   QElapsedTimer endpoint_wait_;
   QString robot_, mode_, key_, side_{"r"}, status_{"Freedrive inactive"};
   bool connected_{false}, left_{false}, right_{false}, cancel_{false};
+  QString pending_robot_, pending_mode_, pending_key_;
+  bool pending_context_{false}, pending_connected_{false}, pending_left_{false}, pending_right_{false};
   State state_{Idle};
 };
 bool run_ur_freedrive_contract_test();

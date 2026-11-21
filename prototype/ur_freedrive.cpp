@@ -1,8 +1,18 @@
 #include "ur_freedrive.hpp"
 #include "ur_motion_actions.hpp"
 #include <QEventLoop>
+#include <QPointer>
 
 namespace {
+class FakeTask final : public UrMotionActionsAdapter {
+public:
+ bool connected() const override { return true; }
+ UrArmReadiness inspect(const std::string &, const std::string &) override { return readiness; }
+ bool start(const UrMotionTask &, QString *) override { return true; }
+ void stop(const QString &) override {}
+ UrMotionTaskStatus status(const QString &) const override { return {"Stop unconfirmed", "remote motion may continue", -1}; }
+ UrArmReadiness readiness;
+};
 class FakeFreedrive final : public UrFreedriveAdapter {
 public:
  bool connected() const override { return true; }
@@ -29,6 +39,22 @@ bool run_ur_freedrive_contract_test() {
  f.leave(); if (!f.busy() || f.active() || a->messages.back()) return false;
  a->done(false, "unconfirmed"); if (!f.busy()) return false;
  f.leave(); a->done(true, "restored"); if (f.busy()) return false;
+ if (!f.enter()) return false;
+ f.setContext("mur620b", "Hardware", "next", true, true, true);
+ if (!f.busy() || f.robot() != "mur620d") return false;
+ auto activated=a->done; activated(true, "controller active");
+ if (!f.busy() || f.active() || a->messages.back()) return false;
+ a->done(true, "restored");
+ if (f.busy() || f.robot() != "mur620b") return false;
+ f.setShutdownInterlock([](const QString &, const QString &) { return true; });
+ if (f.enter()) return false;
+ f.setShutdownInterlock({});
+ auto task = std::make_shared<FakeTask>(); task->readiness = r;
+ UrMotionActions motion(task); f.setMotion(&motion);
+ motion.setContext("Lab", "Hardware", "host", 62, "mur620d", "Connected", "session", "$HOME/colcon_ws", true, true);
+ if (!motion.startHome()) return false;
+ motion.cancel(); motion.refresh();
+ if (!motion.busy() || f.enter()) return false;
  return true;
 }
 
@@ -56,9 +82,13 @@ UrFreedrive::UrFreedrive(std::shared_ptr<UrFreedriveAdapter> adapter, QObject * 
 void UrFreedrive::setContext(const QString & robot, const QString & mode, const QString & key,
  bool connected, bool left, bool right) {
  if (robot != robot_ || mode != mode_ || key != key_ || connected != connected_ || left != left_ || right != right_) {
-   if (busy()) { leave(); status_ = "Session changed · exit must be confirmed"; emit changed(); return; }
+   if (busy()) { pending_robot_=robot; pending_mode_=mode; pending_key_=key; pending_connected_=connected; pending_left_=left; pending_right_=right; pending_context_=true; leave(); status_ = "Session changed · exit must be confirmed"; emit changed(); return; }
    robot_=robot; mode_=mode; key_=key; connected_=connected; left_=left; right_=right; emit changed();
  }
+}
+void UrFreedrive::applyPendingContext() {
+ if (!pending_context_) return;
+ robot_=pending_robot_; mode_=pending_mode_; key_=pending_key_; connected_=pending_connected_; left_=pending_left_; right_=pending_right_; pending_context_=false;
 }
 void UrFreedrive::selectArm(const QString & side) {
  if (!busy() && (side == "l" || side == "r")) { side_=side; emit changed(); }
@@ -74,8 +104,11 @@ bool UrFreedrive::enter() {
  try { r=adapter_->inspect(robot_.toStdString(), side_.toStdString()); } catch (...) {}
  if (!r.ready()) { status_="Freedrive blocked · selected arm readiness is unconfirmed"; emit changed(); return false; }
  state_=Entering; cancel_=false; status_="Switching controller · confirmation pending"; emit changed();
- adapter_->enter(robot_, side_, [this](bool ok, QString detail) {
-   if (!ok) { state_=adapter_->safeFailure() ? Idle : Unconfirmed; status_=(state_ == Idle ? "Activation blocked · " : "Activation unconfirmed · ") + detail; emit changed(); return; }
+ QPointer<UrFreedrive> guard(this);
+ QTimer::singleShot(6000, this, [guard]() { if (guard && guard->state_ == Entering) { guard->status_="Controller response unconfirmed · waiting before recovery"; emit guard->changed(); } });
+ adapter_->enter(robot_, side_, [this, guard](bool ok, QString detail) {
+   if (!guard) return;
+   if (!ok) { state_=adapter_->safeFailure() ? Idle : Unconfirmed; status_=(state_ == Idle ? "Activation blocked · " : "Activation unconfirmed · ") + detail; if (state_ == Idle) applyPendingContext(); emit changed(); return; }
    if (cancel_) { state_=Unconfirmed; leave(); return; }
    if (!adapter_->publish(true)) { state_=WaitingEndpoint; status_="Waiting for enable endpoint"; endpoint_wait_.start(); timer_.start(); emit changed(); return; }
    state_=Active; status_="Freedrive controller active · keepalive running"; timer_.start(); emit changed();
@@ -86,8 +119,11 @@ void UrFreedrive::leave() {
  if (state_ == Idle || state_ == Leaving) return;
  if (state_ == Entering) { cancel_=true; status_="Cancellation requested · waiting for switch"; emit changed(); return; }
  timer_.stop(); adapter_->publish(false); state_=Leaving; status_="Restoring controller · confirmation pending"; emit changed();
- adapter_->leave([this](bool ok, QString detail) {
-   state_=ok ? Idle : Unconfirmed; status_=(ok ? "Freedrive exited · " : "Exit unconfirmed · ") + detail; emit changed();
+ QPointer<UrFreedrive> guard(this);
+ QTimer::singleShot(6000, this, [guard]() { if (guard && guard->state_ == Leaving) { guard->status_="Restoration response unconfirmed · waiting before recovery"; emit guard->changed(); } });
+ adapter_->leave([this, guard](bool ok, QString detail) {
+   if (!guard) return;
+   state_=ok ? Idle : Unconfirmed; if (ok) applyPendingContext(); status_=(ok ? "Freedrive exited · " : "Exit unconfirmed · ") + detail; emit changed();
  });
 }
 
@@ -111,6 +147,7 @@ public:
  bool safe_failure{false};
 };
 namespace {
+template<typename S> void auto_done(const std::shared_ptr<S> & state, bool ok, const QString & detail) { auto callback=state->done; if (callback) callback(ok, detail); }
 const std::string freedrive_name = "freedrive_mode_controller";
 const std::set<std::string> motion_names = {"integrated_cartesian_admittance_controller", "forward_velocity_controller", "scaled_joint_trajectory_controller", "joint_trajectory_controller", "forward_position_controller", "forward_effort_controller", "force_mode_controller", "passthrough_trajectory_controller", "tool_contact_controller"};
 }
@@ -123,7 +160,7 @@ bool RosUrFreedriveAdapter::safeFailure() const { return state_->safe_failure; }
 UrArmReadiness RosUrFreedriveAdapter::inspect(const std::string & robot, const std::string & side) { return state_->readiness->inspect(robot, side); }
 void RosUrFreedriveAdapter::enter(const QString & robot, const QString & side, std::function<void(bool, QString)> done) {
  auto s=state_; s->done=std::move(done); s->entering=true; s->safe_failure=true; s->previous.clear();
- if (!s->node) { s->done(false, "ROS disconnected"); return; }
+ if (!s->node) { auto_done(s, false, "ROS disconnected"); return; }
  const auto prefix="/" + robot.toStdString() + "/UR10_" + side.toStdString();
  s->list=s->node->create_client<State::List>(prefix + "/controller_manager/list_controllers");
  s->change=s->node->create_client<State::Switch>(prefix + "/controller_manager/switch_controller");
@@ -131,24 +168,24 @@ void RosUrFreedriveAdapter::enter(const QString & robot, const QString & side, s
  std::weak_ptr<State> weak=s;
  QTimer::singleShot(1500, this, [weak]() {
   auto s=weak.lock(); if (!s || !s->done) return;
-  if (!s->node || !s->list->service_is_ready() || !s->change->service_is_ready()) { s->done(false, "controller services unavailable"); return; }
+  if (!s->node || !s->list->service_is_ready() || !s->change->service_is_ready()) { auto_done(s, false, "controller services unavailable"); return; }
  s->list->async_send_request(std::make_shared<State::List::Request>(), [weak](rclcpp::Client<State::List>::SharedFuture f) {
   auto s=weak.lock(); if (!s || !s->done) return;
   bool found=false; try { for (const auto & c : f.get()->controller) {
     if (c.name == freedrive_name && c.state == "inactive") found=true;
     if (motion_names.count(c.name) && c.state == "active") s->previous.push_back(c.name);
-  }} catch (...) { s->done(false, "controller query failed"); return; }
-  if (!found || s->previous.empty()) { s->done(false, "freedrive inactive controller or active motion controller missing"); return; }
+  }} catch (...) { auto_done(s, false, "controller query failed"); return; }
+  if (!found || s->previous.empty()) { auto_done(s, false, "freedrive inactive controller or active motion controller missing"); return; }
   auto request=std::make_shared<State::Switch::Request>(); request->activate_controllers={freedrive_name};
   request->deactivate_controllers=s->previous; request->strictness=State::Switch::Request::STRICT; request->timeout.sec=3;
   s->safe_failure=false;
   s->change->async_send_request(request, [weak](rclcpp::Client<State::Switch>::SharedFuture f2) {
    auto s=weak.lock(); if (!s || !s->done) return;
-   try { if (!f2.get()->ok) { s->done(false, "controller switch failed"); return; } } catch (...) { s->done(false, "controller switch failed"); return; }
+   try { if (!f2.get()->ok) { auto_done(s, false, "controller switch failed"); return; } } catch (...) { auto_done(s, false, "controller switch failed"); return; }
    s->list->async_send_request(std::make_shared<State::List::Request>(), [weak](rclcpp::Client<State::List>::SharedFuture f3) {
     auto s=weak.lock(); if (!s || !s->done) return; bool active=false;
     try { for (const auto & c : f3.get()->controller) if (c.name==freedrive_name && c.state=="active") active=true; } catch (...) {}
-    s->done(active, active ? "controller active" : "controller state unconfirmed");
+    auto_done(s, active, active ? "controller active" : "controller state unconfirmed");
    });
   });
  });
@@ -156,18 +193,18 @@ void RosUrFreedriveAdapter::enter(const QString & robot, const QString & side, s
 }
 void RosUrFreedriveAdapter::leave(std::function<void(bool, QString)> done) {
  auto s=state_; s->done=std::move(done);
- if (!s->node || !s->change || !s->list || !s->change->service_is_ready() || s->previous.empty()) { s->done(false, "restoration unavailable"); return; }
+ if (!s->node || !s->change || !s->list || !s->change->service_is_ready() || s->previous.empty()) { auto_done(s, false, "restoration unavailable"); return; }
  auto request=std::make_shared<State::Switch::Request>(); request->activate_controllers=s->previous;
  request->deactivate_controllers={freedrive_name}; request->strictness=State::Switch::Request::BEST_EFFORT; request->timeout.sec=3;
  std::weak_ptr<State> weak=s;
  s->change->async_send_request(request, [weak](rclcpp::Client<State::Switch>::SharedFuture f) {
   auto s=weak.lock(); if (!s || !s->done) return;
-  try { if (!f.get()->ok) { s->done(false, "restore switch failed"); return; } } catch (...) { s->done(false, "restore switch failed"); return; }
+  try { if (!f.get()->ok) { auto_done(s, false, "restore switch failed"); return; } } catch (...) { auto_done(s, false, "restore switch failed"); return; }
   s->list->async_send_request(std::make_shared<State::List::Request>(), [weak](rclcpp::Client<State::List>::SharedFuture f2) {
    auto s=weak.lock(); if (!s || !s->done) return; bool off=false; std::set<std::string> active;
    try { for (const auto & c : f2.get()->controller) { if (c.name==freedrive_name && c.state=="inactive") off=true; if(c.state=="active") active.insert(c.name); } } catch (...) {}
    for (const auto & c : s->previous) if (!active.count(c)) off=false;
-   s->done(off, off ? "previous controllers restored" : "controller restoration unconfirmed");
+   auto_done(s, off, off ? "previous controllers restored" : "controller restoration unconfirmed");
   });
  });
 }

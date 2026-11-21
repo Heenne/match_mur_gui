@@ -45,6 +45,14 @@ bool run_ur_motion_actions_contract_test()
   adapter->state = {"Running", "Executing", -1};
   action.refresh();
   if (adapter->stops != 2 || !action.status().contains("readiness lost")) return false;
+  adapter->state = {"Stopped", "Cancelled", 130};
+  adapter->readiness.joint_state_fresh = true; action.refresh();
+  action.setShutdownInterlock([](const QString & robot, const QString & side) {
+    return robot == "mur620d" && side == "l";
+  });
+  if (action.startHome() || adapter->starts != 2) return false;
+  action.selectArm("r");
+  if (!action.startHome() || adapter->starts != 3) return false;
   return true;
 }
 
@@ -123,7 +131,8 @@ void UrMotionActions::refresh()
 bool UrMotionActions::canStart(QString * reason)
 {
   refresh();
-  if (busy_ || motion_blocked_) *reason = "Another motion is active";
+  if (shutdown_interlock_ && shutdown_interlock_(robot_, side_)) *reason = "UR shutdown interlock";
+  else if (busy_ || motion_blocked_) *reason = "Another motion is active";
   else if (jog_ && (jog_->armed() || jog_->holding())) *reason = "Disarm arm jog first";
   else if (!ready_) *reason = "Selected arm is not ready";
   else return true;

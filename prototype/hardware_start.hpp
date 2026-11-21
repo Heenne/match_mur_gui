@@ -119,6 +119,7 @@ public:
   void setNode(rclcpp::Node::SharedPtr node);
   bool preflightReady() const { return preflight_ready_; }
   bool busy() const { return busy_; }
+  void setShutdownInterlock(std::function<bool()> fn) { shutdown_interlock_ = std::move(fn); }
 
   Q_INVOKABLE void setContext(const QString & preset, const QString & mode,
     const QString & host, int ros_domain, const QString & robot,
@@ -147,6 +148,7 @@ private:
   QVariantMap defaultOptions() const;
 
   std::shared_ptr<HardwareStartAdapter> adapter_;
+  std::function<bool()> shutdown_interlock_;
   std::unique_ptr<QSettings> settings_;
   QString preset_;
   QString mode_;

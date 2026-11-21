@@ -101,6 +101,7 @@ Item {
                         width: parent.width
                         spacing: 12
                         Panels.SimBaseJog { Layout.fillWidth: true; Layout.preferredHeight: 260; visible: session.mode === "Simulation" }
+                        Panels.UrShutdown { Layout.fillWidth: true; Layout.preferredHeight: 300; controller: urShutdown; visible: session.mode === "Hardware" }
                         Panels.UrFreedrive { Layout.fillWidth: true; Layout.preferredHeight: 150; controller: urFreedrive; visible: session.mode === "Hardware" }
                         Panels.UrMotionActions { Layout.fillWidth: true; Layout.preferredHeight: 480; controller: urMotionActions; visible: session.mode === "Hardware" }
                         Panels.UrArmJog { Layout.fillWidth: true; Layout.preferredHeight: 610; controller: urArmJog; visible: session.mode === "Hardware" }

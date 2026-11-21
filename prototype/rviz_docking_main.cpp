@@ -52,6 +52,7 @@
 #include "ur_arm_jog.hpp"
 #include "ur_freedrive.hpp"
 #include "ur_motion_actions.hpp"
+#include "ur_shutdown.hpp"
 #include "hardware_status.hpp"
 #include "lift_controller.hpp"
 #include "hardware_start.hpp"
@@ -1425,6 +1426,37 @@ public:
       session_->rosDomain(), session_->robot(), session_->connectionState(), session_->workspacePath(), "");
     command_center->rootContext()->setContextProperty("hardwareStart", hardware_start_);
     connect(hardware_start_, &HardwareStartController::changed, this, [this]() { update_motion_context(); });
+    shutdown_adapter_ = std::make_shared<SshUrShutdownAdapter>();
+    shutdown_ = new UrShutdown(shutdown_adapter_, this);
+    auto inhibited = [this](const QString & robot, const QString & side) {
+      return shutdown_->inhibited(session_->target(), robot, side);
+    };
+    ur_arm_jog_->setShutdownInterlock(inhibited);
+    motion_actions_->setShutdownInterlock(inhibited);
+    freedrive_->setShutdownInterlock(inhibited);
+    hardware_start_->setShutdownInterlock([this]() {
+      return shutdown_->busy() || shutdown_->anyInhibited(session_->target(), session_->robot());
+    });
+    shutdown_->setStartBusyHook([this]() {
+      if (hardware_start_->busy()) return true;
+      for (const auto & item : process_manager_->processes()) {
+        const auto process = item.toMap();
+        const auto state = process.value("state").toString();
+        if (process.value("name").toString() == "Hardware · " + session_->robot() &&
+            process.value("host").toString() == session_->target() &&
+            (state == "Connecting" || state == "Starting" || state == "Running" || state == "Stopping" || state == "Stop unconfirmed" || state == "Stop failed")) return true;
+      }
+      return false;
+    });
+    shutdown_->setMotionHooks([this](const QString & robot, const QString & side) {
+      if (ur_arm_jog_->robot() == robot && ur_arm_jog_->side() == side) ur_arm_jog_->stop("UR shutdown");
+      if (motion_actions_->robot() == robot && motion_actions_->side() == side) motion_actions_->cancel();
+      if (freedrive_->robot() == robot && freedrive_->side() == side) freedrive_->leave();
+    }, [this](const QString & robot, const QString & side) {
+      Q_UNUSED(robot); Q_UNUSED(side);
+      return motion_actions_->busy() || freedrive_->busy();
+    });
+    command_center->rootContext()->setContextProperty("urShutdown", shutdown_);
     update_motion_context();
     connect(mocap_, &MocapController::changed, this, [this]() {
       if (session_->connectionState() != "Connected") return;
@@ -1507,6 +1539,9 @@ public:
   {
     if (!motion_actions_ || !hardware_start_) return;
     const auto options = hardware_start_->options();
+    if (shutdown_) shutdown_->setContext(session_->mode(), session_->target(), session_->robot(),
+      session_->connectionState(), options.value("remote_workspace").toString(),
+      options.value("arm_l").toBool(), options.value("arm_r").toBool());
     freedrive_->setContext(session_->robot(), session_->mode(), session_context(),
       session_->connectionState() == "Connected", options.value("arm_l").toBool(), options.value("arm_r").toBool());
     motion_actions_->setContext(session_->preset(), session_->mode(), session_->target(),
@@ -1735,6 +1770,7 @@ public:
 protected:
   void closeEvent(QCloseEvent * event) override
   {
+    if (shutdown_ && shutdown_->busy()) { event->ignore(); return; }
     if (freedrive_ && freedrive_->busy()) {
       pending_close_ = true;
       pending_disconnect_ = true;
@@ -1771,6 +1807,8 @@ private:
   MocapController * mocap_;
   std::shared_ptr<RosUrArmJogAdapter> ur_arm_jog_adapter_;
   UrArmJog * ur_arm_jog_;
+  std::shared_ptr<SshUrShutdownAdapter> shutdown_adapter_;
+  UrShutdown * shutdown_{nullptr};
   std::shared_ptr<SshUrMotionActionsAdapter> motion_adapter_;
   UrMotionActions * motion_actions_{nullptr};
   std::shared_ptr<RosUrFreedriveAdapter> freedrive_adapter_;
@@ -1835,6 +1873,8 @@ int main(int argc, char ** argv)
       // Exercises Qualisys status, map output, freeze/resume, and external bridge ownership with a local ROS graph.
     } else if (arguments[i] == "--contract-test-ur-arm-jog") {
       // Exercises UR readiness gating and hold-to-run arm motion through an injected fake adapter.
+    } else if (arguments[i] == "--contract-test-ur-shutdown") {
+      continue;
     } else if (arguments[i] == "--contract-test-ur-freedrive") {
       // Exercises freedrive through a fake adapter.
     } else if (arguments[i] == "--contract-test-ur-motion-actions") {
@@ -1969,6 +2009,9 @@ int main(int argc, char ** argv)
     }
     qInfo("UR arm jog contract passed");
     return 0;
+  }
+  if (arguments.contains("--contract-test-ur-shutdown")) {
+    return run_ur_shutdown_contract_test() ? 0 : 1;
   }
   if (arguments.contains("--contract-test-ur-freedrive")) return run_ur_freedrive_contract_test() ? 0 : 1;
   if (arguments.contains("--contract-test-ur-motion-actions")) {

@@ -145,6 +145,19 @@ void SshHardwareStartAdapter::startHardware(const HardwareStartConfig & config,
     "Hardware launch could not be started; check for an existing app-owned run and the target configuration."});
 }
 
+void SshHardwareStartAdapter::prepareAmcl(const HardwareStartConfig & config, ActionCallback callback)
+{
+  static const QStringList supported{"mur620a", "mur620b", "mur620c", "mur620d"};
+  if (!supported.contains(config.robot) || config.ros_domain < 0 || config.ros_domain > 232) {
+    callback({false, "AMCL requires a supported robot and valid ROS domain."}); return;
+  }
+  const bool started = processes_ && processes_->startProcess("AMCL localization · " + config.robot,
+    "env", {"ROS_DOMAIN_ID=" + QString::number(config.ros_domain), "PYTHONUNBUFFERED=1", "python3",
+      "-m", "match_mur_gui.localization_support", "--mode", "amcl", "--robot", config.robot});
+  callback({started, started ? "AMCL preparation started; inspect its process log for missing packages or map. Existing external AMCL is reused." :
+    "AMCL preparation could not start or is already running; inspect Processes."});
+}
+
 void SshHardwareStartAdapter::syncSource(const HardwareStartConfig & config, ActionCallback callback)
 {
   if (config.local_workspace.trimmed().isEmpty()) {
@@ -258,6 +271,9 @@ HardwareStartController::HardwareStartController(std::shared_ptr<HardwareStartAd
     settings_ = std::make_unique<QSettings>(settings_path, QSettings::IniFormat);
   }
   options_ = defaultOptions();
+  localization_timer_.setInterval(250);
+  connect(&localization_timer_, &QTimer::timeout, this, &HardwareStartController::refreshLocalization);
+  localization_timer_.start();
 }
 
 QVariantMap HardwareStartController::defaultOptions() const
@@ -275,6 +291,7 @@ void HardwareStartController::setContext(const QString & preset, const QString &
   const QString & remote_workspace)
 {
   const auto old_fingerprint = contextFingerprint();
+  const auto old_robot = robot_;
   const auto old_preset = preset_;
   const auto old_target = host_ + "|" + robot_ + "|" + QString::number(ros_domain_) + "|" + connection_state_;
   preset_ = preset.trimmed();
@@ -295,7 +312,12 @@ void HardwareStartController::setContext(const QString & preset, const QString &
   }
   remote_workspace_ = options_.value("remote_workspace", remote_workspace.trimmed()).toString();
   if (old_target != host_ + "|" + robot_ + "|" + QString::number(ros_domain_) + "|" + connection_state_)
+  {
     localization_statuses_.clear();
+    reported_source_.clear(); have_localization_pose_ = false; amcl_adapter_available_ = false;
+    active_localization_ = "Unknown · no confirmed localization source";
+  }
+  if (old_robot != robot_) resetLocalizationSubscriptions();
   if (old_fingerprint != contextFingerprint()) invalidatePreflight(
     "Target, robot, connection or arm selection changed; run preflight again.");
   emit changed();
@@ -336,6 +358,64 @@ void HardwareStartController::setLocalizationStatus(const QString & source, cons
   if (localization_statuses_.value(source) == status) return;
   localization_statuses_.insert(source, status);
   emit changed();
+}
+
+void HardwareStartController::setNode(rclcpp::Node::SharedPtr node)
+{
+  node_ = std::move(node);
+  resetLocalizationSubscriptions();
+}
+
+void HardwareStartController::resetLocalizationSubscriptions()
+{
+  localization_source_subscription_.reset(); localization_pose_subscription_.reset();
+  reported_source_.clear(); have_localization_pose_ = false; amcl_adapter_available_ = false;
+  active_localization_ = "Unknown · no confirmed localization source";
+  if (!node_ || !QRegularExpression("^[A-Za-z][A-Za-z0-9_]*$").match(robot_).hasMatch()) {
+    emit changed(); return;
+  }
+  const auto prefix = "/" + robot_.toStdString();
+  localization_source_subscription_ = node_->create_subscription<std_msgs::msg::String>(
+    prefix + "/localization_source", rclcpp::QoS(1).transient_local(), [this](std_msgs::msg::String::ConstSharedPtr msg) {
+      reported_source_ = QString::fromStdString(msg->data);
+    });
+  localization_pose_subscription_ = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
+    prefix + "/mir_pose_stamped_simple", 10, [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr msg) {
+      const rclcpp::Time stamp(msg->header.stamp, node_->get_clock()->get_clock_type());
+      const auto stamp_age = (node_->now() - stamp).seconds();
+      have_localization_pose_ = msg->header.frame_id == "map" && stamp.nanoseconds() > 0 &&
+        stamp_age >= -1.0 && stamp_age <= 2.0;
+      pose_received_ = std::chrono::steady_clock::now();
+    });
+  emit changed();
+}
+
+void HardwareStartController::refreshLocalization()
+{
+  if (!node_ || connection_state_ != "Connected") return;
+  const auto prefix = "/" + robot_.toStdString();
+  const auto topics = node_->get_topic_names_and_types();
+  const auto amcl_topic = prefix + "/localization/amcl_pose";
+  const auto found = topics.find(amcl_topic);
+  amcl_adapter_available_ = found != topics.end() &&
+    std::find(found->second.begin(), found->second.end(), "geometry_msgs/msg/PoseWithCovarianceStamped") != found->second.end() &&
+    node_->count_publishers(amcl_topic) > 0;
+  const bool source_present = node_->count_publishers(prefix + "/localization_source") > 0;
+  const auto age = std::chrono::duration<double>(std::chrono::steady_clock::now() - pose_received_).count();
+  const bool fresh = have_localization_pose_ && age <= 1.0;
+  const bool valid_source = reported_source_ == "mir" || reported_source_ == "mocap" || reported_source_ == "amcl";
+  const bool active = source_present && fresh && valid_source;
+  const auto active_text = active ? QString("%1 · receiving map pose").arg(reported_source_) :
+    source_present && reported_source_ == "waiting" ? QString("Waiting · selector reports no valid localization") :
+    QString("Unknown · source or fresh map pose missing");
+  if (active_localization_ != active_text) { active_localization_ = active_text; emit changed(); }
+  setLocalizationStatus("mir", active && reported_source_ == "mir" ? "Ready" : "Waiting",
+    active && reported_source_ == "mir" ? "MiR localization is active and publishing a fresh map pose." :
+      "MiR localization is not confirmed by a fresh map pose and the active-source topic.");
+  setLocalizationStatus("amcl", active && reported_source_ == "amcl" ? "Ready" : "Waiting",
+    active && reported_source_ == "amcl" ? "AMCL localization is active and publishing a fresh map pose." :
+    amcl_adapter_available_ ? "AMCL adapter detected; waiting for the selector and a fresh map pose." :
+      "AMCL adapter missing: no compatible /" + robot_ + "/localization/amcl_pose publisher. Start or connect an AMCL session with a saved map.");
 }
 
 QString HardwareStartController::localizationState() const
@@ -461,7 +541,9 @@ void HardwareStartController::startHardware()
     return;
   }
   if (options_.value("launch_mir").toBool() &&
-    options_.value("localization_source").toString() != "mir" && localizationState() != "Ready") {
+    options_.value("localization_source").toString() != "mir" && localizationState() != "Ready" &&
+    !(options_.value("localization_source").toString() == "amcl" && amcl_adapter_available_ &&
+      localization_statuses_.value("mocap").value("state").toString() == "Ready")) {
     state_ = "Blocked";
     const auto source = options_.value("localization_source", "mir").toString();
     message_ = QString("Hardware start blocked: %1 localization is %2. %3")
@@ -475,6 +557,18 @@ void HardwareStartController::startHardware()
   emit changed();
   adapter_->startHardware(config(), [this](const HardwareActionResult & result) {
     finishAction(result, "Hardware start");
+  });
+}
+
+void HardwareStartController::prepareAmcl()
+{
+  if (busy_ || !adapter_ || mode_ != "Hardware" || connection_state_ != "Connected" ||
+      options_.value("localization_source").toString() != "amcl") {
+    state_ = "Blocked"; message_ = "Select AMCL in a connected Hardware session first."; emit changed(); return;
+  }
+  busy_ = true;
+  adapter_->prepareAmcl(config(), [this](const HardwareActionResult & result) {
+    finishAction(result, "AMCL preparation");
   });
 }
 

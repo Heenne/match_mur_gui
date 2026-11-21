@@ -15,6 +15,7 @@ from match_mur_gui import base_gui
 def gui(monkeypatch):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = QtWidgets.QMainWindow()
+    window.modules = []
     commands = []
     window.ros_worker = SimpleNamespace(
         publish_mir_twist=lambda *args: commands.append(args))

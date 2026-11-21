@@ -16,18 +16,20 @@ jobs:
           repository: match-ROS/match_mobile_robotics_jazzy
           ref: main
           path: src/match_mobile_robotics_jazzy
+      - name: Initialize Ewellix interface sources
+        run: git -C src/match_mobile_robotics_jazzy submodule update --init -- ewellix/ewellix_lift_common
       - uses: ros-tooling/setup-ros@v0.7
         with:
           required-ros-distributions: jazzy
       - name: Install build tools and ROS dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-colcon-common-extensions python3-rosdep dpkg-dev
+          sudo apt-get install -y python3-colcon-common-extensions python3-rosdep dpkg-dev qmlscene ros-jazzy-ur-dashboard-msgs
           rosdep update
           rosdep install --from-paths . src/match_mobile_robotics_jazzy/mir_robot/mir_srvs \
             src/match_mobile_robotics_jazzy/ewellix/ewellix_lift_common/ewellix_interfaces \
             src/match_mobile_robotics_jazzy/mur_robot/mur_control \
-            --ignore-src --rosdistro jazzy -r -y
+            --ignore-src --rosdistro jazzy -r -y --skip-keys qmlscene
       - name: Build package
         run: >-
           colcon build --merge-install --install-base build/install
@@ -58,9 +60,10 @@ jobs:
           from ewellix_interfaces.msg import Command
           from mir_srvs.srv import ColorRGB
           from mur_control.action import JparseMove
+          from ur_dashboard_msgs.srv import IsProgramRunning
           from PyQt5.QtWidgets import QApplication
           from match_mur_gui.app_icon import configure_gui_icon
-          for cls in (Command, ColorRGB, JparseMove):
+          for cls in (Command, ColorRGB, JparseMove, IsProgramRunning):
               cls.__class__.__import_type_support__()
               assert cls._TYPE_SUPPORT
           app = QApplication([])

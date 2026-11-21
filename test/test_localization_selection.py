@@ -1,5 +1,7 @@
 """The base GUI pins its chosen source and starts only the required support."""
 import os
+import sys
+import types
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from types import SimpleNamespace
 from PyQt5 import QtCore, QtWidgets
@@ -49,6 +51,18 @@ def test_support_reuses_owned_processes_and_amcl_opens_navigation_view(monkeypat
     monkeypatch.setattr(base_gui, 'RosWorker', _RosWorker)
     monkeypatch.setattr(base_gui, 'configure_ros_discovery', lambda *_args: 'isolated test')
     monkeypatch.setattr(base_gui.MurBaseGui, '_create_gui_log_file', lambda self: str(tmp_path/'gui.log'))
+    discovered, checked_maps = [], []
+    def package_share(name):
+        discovered.append(name)
+        return str(tmp_path / name)
+    monkeypatch.setattr('ament_index_python.packages.get_package_share_directory', package_share)
+    navigation = types.ModuleType('match_mur_navigation')
+    navigation.__path__ = []
+    saved_map = types.ModuleType('match_mur_navigation.saved_map')
+    saved_map.default_map = lambda: 'fake-map.yaml'
+    saved_map.map_metadata = lambda path: checked_maps.append(path)
+    monkeypatch.setitem(sys.modules, 'match_mur_navigation', navigation)
+    monkeypatch.setitem(sys.modules, 'match_mur_navigation.saved_map', saved_map)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = base_gui.MurBaseGui()
     window.stop_managed_processes = lambda: None
@@ -60,6 +74,8 @@ def test_support_reuses_owned_processes_and_amcl_opens_navigation_view(monkeypat
     assert window.prepare_base_localization('mur620c', 'mir')
     assert not commands
     assert window.prepare_base_localization('mur620c', 'amcl')
+    assert discovered == ['match_mocap_ros2', 'match_mur_navigation', 'nav2_amcl', 'nav2_map_server', 'nav2_lifecycle_manager']
+    assert checked_maps == ['fake-map.yaml']
     assert len(commands) == 2
     assert '--mode mocap' in commands[0][1]
     assert '--mode amcl --robot mur620c' in commands[1][1]

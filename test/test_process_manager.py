@@ -10,13 +10,17 @@ def test_fake_launcher_captures_argv_environment_streams_exit_and_owned_stop(tmp
     fake = tmp_path / "fake-launcher"
     fake.write_text(
         "#!/usr/bin/env python3\n"
-        "import os, signal, subprocess, sys, time\n"
+        "import os, pathlib, signal, subprocess, sys, time\n"
         "if sys.argv[1] == 'exit':\n"
         " print('fake stdout argv=' + repr(sys.argv[1:]) + ' domain=' + os.getenv('ROS_DOMAIN_ID'), flush=True)\n"
         " print('fake stderr', file=sys.stderr, flush=True)\n"
         " sys.exit(7)\n"
         "if sys.argv[1:2] == ['launch']:\n"
         " print('fake simulation argv=' + repr(sys.argv[1:]), flush=True)\n"
+        " sys.exit(0)\n"
+        "if sys.argv[1:] == ['service', '-l']:\n"
+        " print('/unrelated/gazebo/worlds')\n"
+        " if pathlib.Path(os.environ['MUR_FAKE_GAZEBO_WORLD_FILE']).exists(): print('/gazebo/worlds')\n"
         " sys.exit(0)\n"
         "if sys.argv[1:2] == ['sim']:\n"
         " print('fake gz argv=' + repr(sys.argv[1:]), flush=True)\n"
@@ -35,6 +39,7 @@ def test_fake_launcher_captures_argv_environment_streams_exit_and_owned_stop(tmp
     environment = os.environ.copy()
     environment.update({
         "MUR_FAKE_LAUNCHER": str(fake),
+        "MUR_FAKE_GAZEBO_WORLD_FILE": str(tmp_path / "gazebo-world"),
         "ROS_DOMAIN_ID": "47",
         "PATH": str(fake_bin) + os.pathsep + environment["PATH"],
         "QT_QPA_PLATFORM": "offscreen",

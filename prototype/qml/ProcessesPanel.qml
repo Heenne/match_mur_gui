@@ -9,6 +9,11 @@ Rectangle {
     property bool waitingForSimulationServer: false
     property int autoOpenAttempts: 0
     property bool autoOpenTimedOut: false
+    property string autoOpenContext: ""
+    readonly property bool localSimulation: session.mode === "Simulation" && isLocalTarget()
+    readonly property bool gazeboServerReady: processManager.gazeboServerStatus === "Available"
+    readonly property string gazeboClientState: processState("Gazebo world view")
+    readonly property bool gazeboClientActive: gazeboClientState === "Running" || gazeboClientState === "Starting"
     color: "#1b2933"
     radius: 12
     border.color: "#2b3c47"
@@ -21,6 +26,16 @@ Rectangle {
     }
     function isLocalTarget() {
         return session.target === "localhost" || session.target === "127.0.0.1" || session.target === "::1"
+    }
+    function currentContext() {
+        return JSON.stringify([session.preset, session.mode, session.target, session.rosDomain, session.robot])
+    }
+    function gazeboStatusText() {
+        if (gazeboServerReady) return "Gazebo server available · world view can be opened"
+        if (autoOpenTimedOut) return "No Gazebo server detected within 60 seconds. Check the simulation log."
+        if (processManager.gazeboServerStatus === "Failed") return "Could not check Gazebo Transport. See the session log."
+        if (processManager.gazeboServerStatus === "Not found") return "Waiting for a Gazebo server in the local transport partition."
+        return "Checking for a local Gazebo server…"
     }
 
     ColumnLayout {
@@ -47,10 +62,10 @@ Rectangle {
                 onClicked: {
                     if (root.isLocalTarget()) {
                         if (root.processManager.startSimulation(session.robot) && session.gazeboViewOnSimulationStart) {
+                            root.autoOpenContext = root.currentContext()
                             root.waitingForSimulationServer = true
                             root.autoOpenAttempts = 0
                             root.autoOpenTimedOut = false
-                            if (session.connectionState !== "Connected") session.connectToTarget()
                         }
                     } else {
                         root.processManager.startRemoteSimulation(session.target, session.rosDomain, session.robot)
@@ -58,21 +73,28 @@ Rectangle {
                 }
             }
             Button {
-                text: root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" ? "Close Gazebo world view" : "Open Gazebo world view"
-                enabled: root.isLocalTarget() &&
-                         (root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting" || session.simulationServerAvailable)
+                text: root.gazeboClientActive ? "Close Gazebo world view" : "Open Gazebo world view"
+                enabled: root.gazeboClientActive || (root.localSimulation && root.gazeboServerReady)
                 onClicked: {
-                    if (root.processState("Gazebo world view") === "Running" || root.processState("Gazebo world view") === "Starting") root.processManager.stopProcess("Gazebo world view")
+                    if (root.gazeboClientActive) root.processManager.stopProcess("Gazebo world view")
                     else root.processManager.startGazeboView()
                 }
             }
-            Button { text: "Stop app-owned processes"; onClicked: root.processManager.stopAll() }
+            Button { text: "Stop app-owned processes"; onClicked: { root.waitingForSimulationServer = false; root.processManager.stopAll() } }
         }
         Label {
             Layout.fillWidth: true
-            text: session.simulationServerAvailable ? "Simulation server available (/clock publisher detected)" : (root.autoOpenTimedOut ? "Server was not confirmed by /clock within 60 seconds; Gazebo client was not started." : "Gazebo world view needs a confirmed /clock publisher. Connect to the simulation ROS domain.")
-            color: session.simulationServerAvailable ? "#45d6a8" : "#a8bac5"
+            visible: root.localSimulation
+            text: root.gazeboStatusText()
+            color: root.gazeboServerReady ? "#45d6a8" : "#a8bac5"
             wrapMode: Text.WordWrap
+        }
+        Timer {
+            interval: 2000
+            repeat: true
+            triggeredOnStart: true
+            running: root.localSimulation && (root.visible || root.waitingForSimulationServer)
+            onTriggered: root.processManager.probeGazeboServer()
         }
         Timer {
             id: autoOpenTimer
@@ -80,9 +102,10 @@ Rectangle {
             repeat: true
             running: root.waitingForSimulationServer
             onTriggered: {
-                if (session.simulationServerAvailable) {
+                if (root.autoOpenContext !== root.currentContext()) {
                     root.waitingForSimulationServer = false
-                    if (root.processState("Gazebo world view") !== "Running" && root.processState("Gazebo world view") !== "Starting") root.processManager.startGazeboView()
+                } else if (root.gazeboClientActive || (root.gazeboServerReady && root.processManager.startGazeboView())) {
+                    root.waitingForSimulationServer = false
                 } else if (++root.autoOpenAttempts >= 120) {
                     root.waitingForSimulationServer = false
                     root.autoOpenTimedOut = true

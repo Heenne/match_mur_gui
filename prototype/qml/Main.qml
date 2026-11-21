@@ -259,7 +259,7 @@ Item {
                                 onToggled: session.setGazeboViewOnSimulationStart(checked)
                                 Accessible.name: text
                             }
-                            Label { Layout.fillWidth: true; text: "Opens the separately managed client when the app's simulation launch is running or /clock is discovered in the selected ROS domain."; color: window.muted; wrapMode: Text.WordWrap }
+                            Label { Layout.fillWidth: true; text: "Opens the separately managed client when a local Gazebo server is discovered."; color: window.muted; wrapMode: Text.WordWrap }
                             Label { Layout.fillWidth: true; text: session.lastError; visible: session.lastError.length > 0; color: "#ff9b8e"; wrapMode: Text.WordWrap; Accessible.name: session.lastError }
                             Item { Layout.fillHeight: true }
                         }

@@ -1319,6 +1319,22 @@ bool run_process_manager_contract_test()
   const auto fake_launcher = qEnvironmentVariable("MUR_FAKE_LAUNCHER");
   if (fake_launcher.isEmpty() || !QFileInfo::exists(fake_launcher)) return false;
   ProcessManager manager;
+  if (manager.startGazeboView()) {
+    qCritical("Gazebo client started before a Gazebo server was confirmed");
+    return false;
+  }
+  const auto wait_for_gazebo_status = [&manager](const QString & expected) {
+    QElapsedTimer timeout;
+    timeout.start();
+    while (manager.gazeboServerStatus() != expected && timeout.elapsed() < 5000) {
+      QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+    if (manager.gazeboServerStatus() == expected) return true;
+    qCritical("Expected Gazebo status '%s', got '%s'", qPrintable(expected),
+      qPrintable(manager.gazeboServerStatus()));
+    return false;
+  };
+  if (!wait_for_gazebo_status("Not found")) return false;
   if (!manager.startProcess("fake exit", fake_launcher, {"exit"})) return false;
   QElapsedTimer timer;
   timer.start();
@@ -1369,8 +1385,12 @@ bool run_process_manager_contract_test()
           }
           if (manager.log().contains("fake simulation argv=")) break;
         }
+        QFile fake_world(qEnvironmentVariable("MUR_FAKE_GAZEBO_WORLD_FILE"));
         if (!manager.startProcess("fake simulation server", fake_launcher, {"hold"}) ||
-          !manager.startGazeboView()) return false;
+          !fake_world.open(QIODevice::WriteOnly)) return false;
+        fake_world.close();
+        manager.probeGazeboServer();
+        if (!wait_for_gazebo_status("Available") || rclcpp::ok() || !manager.startGazeboView()) return false;
         timer.restart();
         while (timer.elapsed() < 5000 && !manager.log().contains("fake gz argv=")) {
           QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
@@ -1391,6 +1411,9 @@ bool run_process_manager_contract_test()
           if (client_stopped) break;
         }
         if (!client_stopped) return false;
+        if (!fake_world.remove()) return false;
+        manager.probeGazeboServer();
+        if (!wait_for_gazebo_status("Not found") || manager.startGazeboView()) return false;
         manager.stopProcess("fake simulation server");
         return true;
       }

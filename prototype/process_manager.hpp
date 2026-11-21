@@ -1,8 +1,10 @@
 #pragma once
 
 #include <QObject>
+#include <QElapsedTimer>
 #include <QHash>
 #include <QProcess>
+#include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -13,6 +15,7 @@ class ProcessManager : public QObject
   Q_OBJECT
   Q_PROPERTY(QVariantList processes READ processes NOTIFY changed)
   Q_PROPERTY(QString log READ log NOTIFY logChanged)
+  Q_PROPERTY(QString gazeboServerStatus READ gazeboServerStatus NOTIFY gazeboServerStatusChanged)
 
 public:
   explicit ProcessManager(QObject * parent = nullptr, const QString & ssh_program = "ssh");
@@ -20,6 +23,8 @@ public:
 
   QVariantList processes() const;
   QString log() const { return log_; }
+  QString gazeboServerStatus() const { return gazebo_server_status_; }
+  Q_INVOKABLE void probeGazeboServer();
   Q_INVOKABLE bool startSimulation(const QString & robot);
   Q_INVOKABLE bool startRemoteSimulation(const QString & host, int ros_domain, const QString & robot);
   Q_INVOKABLE bool startRemoteHardware(const QString & host, int ros_domain, const QString & robot,
@@ -37,6 +42,7 @@ public:
 signals:
   void changed();
   void logChanged();
+  void gazeboServerStatusChanged();
 
 private:
   struct ManagedProcess {
@@ -60,8 +66,13 @@ private:
     const QString & shell_command, const QString & start_log);
   void setState(ManagedProcess * managed, const QString & state);
   void appendLog(const QString & line);
+  void setGazeboServerStatus(const QString & status, const QString & error = {});
   QHash<QString, ManagedProcess *> managed_;
   QString ssh_program_;
   QString log_;
+  QProcess gazebo_probe_;
+  QTimer gazebo_probe_timeout_;
+  QElapsedTimer gazebo_probe_age_;
+  QString gazebo_server_status_{"Not checked"};
   LogStore * log_store_{nullptr};
 };

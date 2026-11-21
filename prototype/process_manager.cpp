@@ -51,10 +51,45 @@ QStringList remote_stop_arguments(const QString & host, qint64 pid, const QStrin
 }
 
 ProcessManager::ProcessManager(QObject * parent, const QString & ssh_program)
-: QObject(parent), ssh_program_(ssh_program) {}
+: QObject(parent), ssh_program_(ssh_program)
+{
+  gazebo_probe_timeout_.setSingleShot(true);
+  connect(&gazebo_probe_timeout_, &QTimer::timeout, this, [this]() {
+    setGazeboServerStatus("Failed", "Gazebo Transport discovery timed out");
+    gazebo_probe_.kill();
+  });
+  connect(&gazebo_probe_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+    if (error != QProcess::FailedToStart) return;
+    gazebo_probe_timeout_.stop();
+    setGazeboServerStatus("Failed", gazebo_probe_.errorString());
+  });
+  connect(&gazebo_probe_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+    [this](int code, QProcess::ExitStatus status) {
+      gazebo_probe_timeout_.stop();
+      const auto services = gazebo_probe_.readAllStandardOutput().split('\n');
+      const auto error = QString::fromLocal8Bit(gazebo_probe_.readAllStandardError()).trimmed();
+      if (status != QProcess::NormalExit || code != 0) {
+        setGazeboServerStatus("Failed", error.isEmpty() ? gazebo_probe_.errorString() : error);
+        return;
+      }
+      for (const auto & service : services) {
+        if (service.trimmed() == "/gazebo/worlds") {
+          gazebo_probe_age_.start();
+          setGazeboServerStatus("Available");
+          return;
+        }
+      }
+      setGazeboServerStatus("Not found");
+    });
+}
 
 ProcessManager::~ProcessManager()
 {
+  gazebo_probe_.disconnect(this);
+  if (gazebo_probe_.state() != QProcess::NotRunning) {
+    gazebo_probe_.kill();
+    gazebo_probe_.waitForFinished(1000);
+  }
   stopAll();
   for (auto * managed : managed_) {
     if (managed->stop_process) managed->stop_process->waitForFinished(10000);
@@ -240,8 +275,30 @@ bool ProcessManager::startRemoteOwnedProcess(const QString & process_name, const
   return true;
 }
 
+void ProcessManager::probeGazeboServer()
+{
+  if (gazebo_probe_.state() != QProcess::NotRunning) return;
+  if (gazebo_server_status_ == "Available" && gazebo_probe_age_.hasExpired(5000)) {
+    setGazeboServerStatus("Not checked");
+  }
+  gazebo_probe_timeout_.start(4000);
+  gazebo_probe_.start("gz", {"service", "-l"});
+}
+
+void ProcessManager::setGazeboServerStatus(const QString & status, const QString & error)
+{
+  if (gazebo_server_status_ == status) return;
+  gazebo_server_status_ = status;
+  if (!error.isEmpty()) appendLog("Gazebo server discovery: " + error);
+  emit gazeboServerStatusChanged();
+}
+
 bool ProcessManager::startGazeboView()
 {
+  if (gazebo_server_status_ != "Available" || gazebo_probe_age_.hasExpired(5000)) {
+    probeGazeboServer();
+    return false;
+  }
   return startProcess("Gazebo world view", "gz", {"sim", "-g"});
 }
 

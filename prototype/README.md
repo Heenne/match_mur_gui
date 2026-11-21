@@ -98,11 +98,11 @@ safety-rated stop or teach pendant.
 The Processes view starts the local MuR620 simulation and manages the Gazebo
 world view as a separate `gz sim -g` client. Starting or stopping the client
 does not stop the simulation server, `/clock`, ROS bridge, or their logs. The
-client can be opened later when `/clock` is discovered in the selected ROS
-domain. When auto-open is enabled, starting simulation also requests a ROS
-connection and waits for `/clock`; the client is not started if the server is
-not confirmed within 60 seconds. Client launch output and failure state appear
-in Processes. The app does not discover Gazebo servers through Gazebo Transport.
+client becomes available when the Gazebo Transport service `/gazebo/worlds` is
+discovered in the local partition. This works independently of the app's ROS
+connection and RViz configuration. When auto-open is enabled, starting the
+simulation waits up to 60 seconds for this service. Client launch output and
+failure state appear in Processes.
 
 The optional **Mocap** view reads raw `/qualisys/<robot>/pose`, map-frame
 `/qualisys_map/<robot>/pose`, `/tf_static` (`map -> mocap`), and the per-robot

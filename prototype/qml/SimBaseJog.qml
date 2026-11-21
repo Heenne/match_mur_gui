@@ -58,13 +58,13 @@ Item {
     Component.onCompleted: {
         forceActiveFocus()
         simBaseJog.setContext(session.robot, session.mode,
-            session.preset + "|" + session.target, session.connectionState === "Connected")
+            session.preset + "|" + session.target, session.connectionState === "Connected", session.simCommandTopic)
     }
     Connections {
         target: session
         function onChanged() {
             simBaseJog.setContext(session.robot, session.mode,
-                session.preset + "|" + session.target, session.connectionState === "Connected")
+                session.preset + "|" + session.target, session.connectionState === "Connected", session.simCommandTopic)
         }
     }
     Connections {
@@ -92,7 +92,7 @@ Item {
             Label { text: "Simulation base jog"; color: panel.foreground; font.pixelSize: 20; font.bold: true }
             Label {
                 Layout.fillWidth: true
-                text: "Only /" + session.robot + "/mobile_base_controller/cmd_vel · TwistStamped · max 0.15 m/s, 0.4 rad/s"
+                text: "Configured endpoint: " + (session.simCommandTopic || "not configured") + " · TwistStamped · max 0.15 m/s, 0.4 rad/s"
                 color: panel.muted
                 wrapMode: Text.WordWrap
             }

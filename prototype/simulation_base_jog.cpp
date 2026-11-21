@@ -8,6 +8,7 @@
 
 #include <QCoreApplication>
 #include <QEventLoop>
+#include <QRegularExpression>
 #include <QTimer>
 
 namespace
@@ -16,11 +17,6 @@ constexpr double kMaxLinearMps = 0.15;
 constexpr double kMaxAngularRadps = 0.4;
 constexpr auto kCommandLifespan = std::chrono::milliseconds(250);
 const std::string kTwistStampedType = "geometry_msgs/msg/TwistStamped";
-
-std::string topicFor(const QString & robot)
-{
-  return "/" + robot.toStdString() + "/mobile_base_controller/cmd_vel";
-}
 
 std::string frameFor(const QString & robot)
 {
@@ -103,17 +99,18 @@ SimulationBaseJog::SimulationBaseJog(std::shared_ptr<SimBaseJogAdapter> adapter,
 }
 
 void SimulationBaseJog::setContext(
-  const QString & robot, const QString & mode, const QString & session_key, bool connected)
+  const QString & robot, const QString & mode, const QString & session_key, bool connected, const QString & topic)
 {
   const auto selected = robot.trimmed();
   const bool valid_robot = !selected.isEmpty() && !selected.contains('/');
   if (selected != robot_ || mode != context_mode_ || session_key != context_key_ ||
-    connected != context_connected_) {
+    connected != context_connected_ || topic != configured_topic_) {
     stop("session context changed");
     enabled_ = false;
     robot_ = valid_robot ? selected : QString();
     context_mode_ = mode;
     context_key_ = session_key;
+    configured_topic_ = topic;
     context_connected_ = connected;
     setStatus("Simulation jog disabled · confirm the new session before enabling");
     emit changed();
@@ -164,7 +161,7 @@ bool SimulationBaseJog::press(const QString & direction)
   else return false;
   if (!send(linear_x_, angular_z_)) {
     clearHold();
-    setStatus("Unavailable · expected TwistStamped subscriber on " + QString::fromStdString(topicFor(robot_)));
+    setStatus("Unavailable · expected TwistStamped subscriber on " + configured_topic_);
     return false;
   }
   holding_ = true;
@@ -194,7 +191,8 @@ void SimulationBaseJog::tick()
   if (!enabled_ || !context_connected_ || context_mode_ != "Simulation" ||
     !adapter_ || !adapter_->connected() || !send(linear_x_, angular_z_)) {
     clearHold();
-    setStatus("Stopped · simulation graph or verified controller endpoint was lost");
+    enabled_ = false;
+    setStatus("Stopped and disabled · simulation graph or verified controller endpoint was lost");
     emit changed();
   }
 }
@@ -203,7 +201,9 @@ bool SimulationBaseJog::send(double linear_x, double angular_z)
 {
   if (!adapter_ || !adapter_->connected() || robot_.isEmpty()) return false;
   try {
-    const auto topic = topicFor(robot_);
+    static const QRegularExpression valid("^/[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)+$");
+    if (!valid.match(configured_topic_).hasMatch() || !configured_topic_.startsWith("/" + robot_ + "/")) return false;
+    const auto topic = configured_topic_.toStdString();
     const auto endpoint = adapter_->inspect(topic);
     if (endpoint.type != kTwistStampedType || endpoint.subscribers < 1) return false;
     adapter_->publish(topic, frameFor(robot_), linear_x, angular_z);
@@ -236,6 +236,9 @@ bool run_sim_base_jog_contract_test()
   jog.setEnabled(true);
   if (jog.enabled() || jog.press("forward") || !adapter->commands.empty()) return false;
   jog.setContext("mur620a", "Simulation", "Local simulation|localhost", true);
+  jog.setEnabled(true);
+  if (jog.press("forward") || !adapter->commands.empty()) return false;
+  jog.setContext("mur620a", "Simulation", "Local simulation|localhost", true, "/mur620a/custom/cmd_vel");
   if (jog.press("forward") || !adapter->commands.empty()) return false;
   jog.setEnabled(true);
   jog.setLinearSpeed(10.0);
@@ -248,7 +251,7 @@ bool run_sim_base_jog_contract_test()
   if (jog.linearSpeed() != 0.01 || jog.angularSpeed() != 0.05) return false;
   jog.setLinearSpeed(10.0);
   if (!jog.press("forward") || adapter->commands.size() != 1) return false;
-  const auto topic = "/mur620a/mobile_base_controller/cmd_vel";
+  const auto topic = "/mur620a/custom/cmd_vel";
   if (adapter->commands.back().topic != topic || adapter->commands.back().linear != kMaxLinearMps) return false;
   waitForEvents(120);
   if (adapter->commands.size() < 2 || adapter->commands.back().linear != kMaxLinearMps) return false;
@@ -262,10 +265,10 @@ bool run_sim_base_jog_contract_test()
   jog.stop("focus lost");
   if (jog.holding() || adapter->commands.back().angular != 0.0) return false;
   if (!jog.press("forward")) return false;
-  jog.setContext("mur620b", "Simulation", "Local simulation|localhost", true);
+  jog.setContext("mur620b", "Simulation", "Local simulation|localhost", true, "/mur620b/mobile_base_controller/cmd_vel");
   if (jog.enabled() || jog.holding() || adapter->commands.back().linear != 0.0) return false;
 
-  jog.setContext("mur620a", "Simulation", "Lab simulation|localhost", true);
+  jog.setContext("mur620a", "Simulation", "Lab simulation|localhost", true, "/mur620a/mobile_base_controller/cmd_vel");
   jog.setEnabled(true);
   adapter->type = "geometry_msgs/msg/Twist";
   if (jog.press("forward")) return false;

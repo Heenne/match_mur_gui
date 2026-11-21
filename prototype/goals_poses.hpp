@@ -44,6 +44,8 @@ class RosGoalsPosesAdapter final : public GoalsPosesAdapter
 public:
   explicit RosGoalsPosesAdapter(rclcpp::Node::SharedPtr node = {});
   void setNode(rclcpp::Node::SharedPtr node);
+  void setEndpoints(const QString & robot, const QString & mode, const QString & goal,
+    const QString & cancel, const QString & pose);
   bool connected() const override;
   bool sendGoal(const QString & robot, const QString & mode, const QString & frame, double x, double y, double yaw,
     QString * detail) override;
@@ -65,6 +67,7 @@ private:
     std::chrono::steady_clock::time_point received;
   };
   rclcpp::Node::SharedPtr node_;
+  QString configured_robot_, configured_mode_, goal_endpoint_, cancel_endpoint_, pose_endpoint_;
   std::unordered_map<std::string, rclcpp_action::Client<NavigateToPose>::SharedPtr> nav2_clients_;
   std::unordered_map<std::string, NavigateGoalHandle::SharedPtr> nav2_goals_;
   std::unordered_map<std::string, std::shared_future<action_msgs::srv::CancelGoal::Response::SharedPtr>> nav2_cancels_;

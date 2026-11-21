@@ -214,3 +214,9 @@ Herstellerquellen:
 - [UR: Power Down The Robot](https://www.universal-robots.com/manuals/EN/HTML/SW5_24/Content/prod-usr-man/complianceUR5e/H_g5_sections/mechanical_interface_g5/powerdown.htm)
 - [UR: Dashboard-Befehle für e-Series](https://www.universal-robots.com/manuals/EN/HTML/SW5_23/Content/prod-dashboard/Dashboard_table.htm)
 - [UR: Dashboard-Befehle für CB-Series](https://www.universal-robots.com/articles/ur/dashboard-server-cb-series-port-29999/)
+
+### Command Center: Endpunkte im Profil
+
+Im Command Center werden bewegende Basis- und Navigationsendpunkte unter **Settings → Edit profile** für jedes Preset ausdrücklich konfiguriert. Leere Felder deaktivieren die entsprechende Funktion. Alle Namen müssen absolute ROS-Namen unter dem ausgewählten Roboter sein, z. B. `/mur620d/cmd_vel` mit `geometry_msgs/msg/Twist` für die MiR-Basis oder `/mur620d/mobile_base_controller/cmd_vel` (TwistStamped) für die Simulation. Die GUI prüft den konfigurierten Namen, Nachrichtentyp und passenden Subscriber vor dem Senden. Bei Verlust des MiR-Endpunkts wird die Jog-Freigabe aufgehoben. Nach einem Profilwechsel muss erneut freigegeben werden.
+
+Für Navigation bezeichnet das Goal-Feld im Simulationsmodus die Nav2-Action `NavigateToPose` und das Pose-Feld eine `PoseStamped`-Quelle. Im Hardwaremodus bezeichnet Goal einen `PoseStamped`-Empfänger, Cancel einen `actionlib_msgs/msg/GoalID`-Empfänger und Pose eine `geometry_msgs/msg/Pose`-Quelle. Diese Zuordnung gehört zum jeweiligen Modus; nach einem Moduswechsel müssen die Navigationsendpunkte erneut bestätigt werden. Endpunkte werden im Preset gespeichert und in portable Presets exportiert. Bestehende Presets ohne diese Felder starten mit deaktivierten Funktionen und müssen eingerichtet werden.

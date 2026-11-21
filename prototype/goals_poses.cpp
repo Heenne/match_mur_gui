@@ -1,6 +1,7 @@
 #include "goals_poses.hpp"
 
 #include <cmath>
+#include <thread>
 
 #include <QDir>
 #include <QFile>
@@ -66,16 +67,32 @@ void RosGoalsPosesAdapter::setNode(rclcpp::Node::SharedPtr node)
   nav2_clients_.clear(); nav2_goals_.clear(); nav2_cancels_.clear(); sim_poses_.clear(); latest_sim_poses_.clear();
   node_ = std::move(node);
 }
+void RosGoalsPosesAdapter::setEndpoints(const QString & robot, const QString & mode,
+  const QString & goal, const QString & cancel, const QString & pose)
+{
+  static const QRegularExpression valid("^/[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)+$");
+  const auto check = [&](const QString & topic) {
+    return topic.isEmpty() || (valid.match(topic).hasMatch() && topic.startsWith("/" + robot + "/"));
+  };
+  const bool safe = !robot_root(robot).isEmpty() && (mode == "Simulation" || mode == "Hardware") &&
+    check(goal) && check(cancel) && check(pose);
+  configured_robot_ = safe ? robot : QString();
+  configured_mode_ = safe ? mode : QString();
+  goal_endpoint_ = safe ? goal : QString();
+  cancel_endpoint_ = safe ? cancel : QString();
+  pose_endpoint_ = safe ? pose : QString();
+}
 bool RosGoalsPosesAdapter::connected() const { return static_cast<bool>(node_); }
 
 bool RosGoalsPosesAdapter::sendGoal(const QString & robot, const QString & mode, const QString & frame, double x, double y,
   double yaw, QString * detail)
 {
   const auto root = robot_root(robot);
-  if (!node_ || root.isEmpty()) { *detail = "No ROS connection or invalid selected robot"; return false; }
+  if (!node_ || root.isEmpty() || robot != configured_robot_ || mode != configured_mode_) { *detail = "No ROS connection or matching configured profile"; return false; }
   if (mode == "Simulation") {
-    const auto action = root.toStdString() + "/navigate_to_pose";
-    auto & client = nav2_clients_[robot.toStdString()];
+    const auto action = goal_endpoint_.toStdString();
+    if (action.empty()) { *detail = "Simulation goal endpoint is not configured"; return false; }
+    auto & client = nav2_clients_[goal_endpoint_.toStdString()];
     if (!client) client = rclcpp_action::create_client<NavigateToPose>(node_, action);
     if (!client->action_server_is_ready()) {
       *detail = QString("Simulation goal not sent: Nav2 action server unavailable on %1").arg(QString::fromStdString(action));
@@ -87,13 +104,13 @@ bool RosGoalsPosesAdapter::sendGoal(const QString & robot, const QString & mode,
     goal.pose.pose.position.x = x; goal.pose.pose.position.y = y;
     goal.pose.pose.orientation.z = std::sin(yaw / 2.0); goal.pose.pose.orientation.w = std::cos(yaw / 2.0);
     rclcpp_action::Client<NavigateToPose>::SendGoalOptions options;
-    options.goal_response_callback = [this, robot](const NavigateGoalHandle::SharedPtr & handle) {
+    options.goal_response_callback = [this, robot, action](const NavigateGoalHandle::SharedPtr & handle) {
       if (!handle) { emit operationCompleted(QString("Nav2 rejected goal for %1").arg(robot), true); return; }
-      nav2_goals_[robot.toStdString()] = handle;
+      nav2_goals_[action] = handle;
       emit operationCompleted(QString("Nav2 accepted goal for selected robot %1").arg(robot), false);
     };
-    options.result_callback = [this, robot](const NavigateGoalHandle::WrappedResult & result) {
-      nav2_goals_.erase(robot.toStdString());
+    options.result_callback = [this, robot, action](const NavigateGoalHandle::WrappedResult & result) {
+      nav2_goals_.erase(action);
       if (result.code == rclcpp_action::ResultCode::SUCCEEDED) emit operationCompleted(QString("Nav2 reached goal for %1").arg(robot), false);
       else if (result.code == rclcpp_action::ResultCode::CANCELED) emit operationCompleted(QString("Nav2 canceled goal for %1").arg(robot), false);
       else emit operationCompleted(QString("Nav2 goal failed for %1").arg(robot), true);
@@ -103,12 +120,13 @@ bool RosGoalsPosesAdapter::sendGoal(const QString & robot, const QString & mode,
     return true;
   }
   if (mode != "Hardware") { *detail = "Goal not sent: unsupported profile mode"; return false; }
-  const auto topic = root.toStdString() + "/move_base_simple/goal";
+  const auto topic = goal_endpoint_.toStdString();
+  if (topic.empty()) { *detail = "Goal endpoint is not configured"; return false; }
   const auto graph = node_->get_node_graph_interface();
   const auto discovered = graph->get_topic_names_and_types();
   const auto endpoint = discovered.find(topic);
   if (endpoint == discovered.end() ||
-    std::find(endpoint->second.begin(), endpoint->second.end(), "geometry_msgs/msg/PoseStamped") == endpoint->second.end() ||
+    (endpoint->second.size() != 1 || endpoint->second.front() != "geometry_msgs/msg/PoseStamped") ||
     graph->count_subscribers(topic) == 0) {
     *detail = QString("Goal not sent: no verified PoseStamped receiver on %1").arg(QString::fromStdString(topic));
     return false;
@@ -128,25 +146,26 @@ bool RosGoalsPosesAdapter::sendGoal(const QString & robot, const QString & mode,
 bool RosGoalsPosesAdapter::cancel(const QString & robot, const QString & mode, QString * detail)
 {
   const auto root = robot_root(robot);
-  if (!node_ || root.isEmpty()) { *detail = "No ROS connection or invalid selected robot"; return false; }
+  if (!node_ || root.isEmpty() || robot != configured_robot_ || mode != configured_mode_) { *detail = "No ROS connection or matching configured profile"; return false; }
   if (mode == "Simulation") {
-    auto client_it = nav2_clients_.find(robot.toStdString());
-    auto goal_it = nav2_goals_.find(robot.toStdString());
+    auto client_it = nav2_clients_.find(goal_endpoint_.toStdString());
+    auto goal_it = nav2_goals_.find(goal_endpoint_.toStdString());
     if (client_it == nav2_clients_.end() || goal_it == nav2_goals_.end()) {
       *detail = QString("No GUI-owned Nav2 goal to cancel for selected robot %1").arg(robot);
       return false;
     }
-    nav2_cancels_[robot.toStdString()] = client_it->second->async_cancel_goal(goal_it->second);
+    nav2_cancels_[goal_endpoint_.toStdString()] = client_it->second->async_cancel_goal(goal_it->second);
     *detail = QString("Nav2 cancel requested for selected robot %1").arg(robot);
     return true;
   }
   if (mode != "Hardware") { *detail = "Navigation cancel unavailable: unsupported profile mode"; return false; }
-  const auto topic = root.toStdString() + "/move_base/cancel";
+  const auto topic = cancel_endpoint_.toStdString();
+  if (topic.empty()) { *detail = "Cancel endpoint is not configured"; return false; }
   const auto graph = node_->get_node_graph_interface();
   const auto discovered = graph->get_topic_names_and_types();
   const auto endpoint = discovered.find(topic);
   if (endpoint == discovered.end() ||
-    std::find(endpoint->second.begin(), endpoint->second.end(), "actionlib_msgs/msg/GoalID") == endpoint->second.end() ||
+    (endpoint->second.size() != 1 || endpoint->second.front() != "actionlib_msgs/msg/GoalID") ||
     graph->count_subscribers(topic) == 0) {
     *detail = QString("Navigation cancel unavailable: no verified receiver on %1").arg(QString::fromStdString(topic));
     return false;
@@ -162,23 +181,24 @@ bool RosGoalsPosesAdapter::currentPose(const QString & robot, const QString & mo
   QString * frame, double * ageSeconds, QString * detail)
 {
   const auto root = robot_root(robot);
-  if (!node_ || root.isEmpty()) { *detail = "No ROS connection or invalid selected robot"; return false; }
+  if (!node_ || root.isEmpty() || robot != configured_robot_ || mode != configured_mode_) { *detail = "No ROS connection or matching configured profile"; return false; }
   if (mode == "Simulation") {
-    const auto topic = root.toStdString() + "/ground_truth/pose";
+    const auto topic = pose_endpoint_.toStdString();
+    if (topic.empty()) { *detail = "Pose endpoint is not configured"; return false; }
     const auto graph = node_->get_node_graph_interface();
     const auto topics = graph->get_topic_names_and_types();
     const auto endpoint = topics.find(topic);
     if (endpoint == topics.end() ||
-      std::find(endpoint->second.begin(), endpoint->second.end(), "geometry_msgs/msg/PoseStamped") == endpoint->second.end() ||
+      (endpoint->second.size() != 1 || endpoint->second.front() != "geometry_msgs/msg/PoseStamped") ||
       graph->count_publishers(topic) == 0) {
       *detail = QString("Simulation pose unavailable: no verified PoseStamped source on %1").arg(QString::fromStdString(topic));
       return false;
     }
-    auto found = latest_sim_poses_.find(robot.toStdString());
+    auto found = latest_sim_poses_.find(topic);
     if (!sim_poses_.count(topic)) {
       sim_poses_[topic] = node_->create_subscription<geometry_msgs::msg::PoseStamped>(topic, 10,
-        [this, robot](geometry_msgs::msg::PoseStamped::ConstSharedPtr message) {
-          latest_sim_poses_[robot.toStdString()] = {*message, std::chrono::steady_clock::now()};
+        [this, topic](geometry_msgs::msg::PoseStamped::ConstSharedPtr message) {
+          latest_sim_poses_[topic] = {*message, std::chrono::steady_clock::now()};
         });
       *detail = QString("Waiting for simulation ground truth on %1").arg(QString::fromStdString(topic));
       return false;
@@ -194,21 +214,22 @@ bool RosGoalsPosesAdapter::currentPose(const QString & robot, const QString & mo
     return true;
   }
   if (mode != "Hardware") { *detail = "Current pose unavailable: unsupported profile mode"; return false; }
-  const auto topic = root.toStdString() + "/robot_pose";
+  const auto topic = pose_endpoint_.toStdString();
+  if (topic.empty()) { *detail = "Pose endpoint is not configured"; return false; }
   const auto graph = node_->get_node_graph_interface();
   const auto topics = graph->get_topic_names_and_types();
   const auto endpoint = topics.find(topic);
   if (endpoint == topics.end() ||
-    std::find(endpoint->second.begin(), endpoint->second.end(), "geometry_msgs/msg/Pose") == endpoint->second.end() ||
+    (endpoint->second.size() != 1 || endpoint->second.front() != "geometry_msgs/msg/Pose") ||
     graph->count_publishers(topic) == 0) {
     *detail = QString("Current MiR pose unavailable: no verified Pose source on %1").arg(QString::fromStdString(topic));
     return false;
   }
-  auto found = latest_poses_.find(robot.toStdString());
+  auto found = latest_poses_.find(topic);
   if (!poses_.count(topic)) {
     poses_[topic] = node_->create_subscription<geometry_msgs::msg::Pose>(topic, 10,
-      [this, robot](geometry_msgs::msg::Pose::ConstSharedPtr message) {
-        latest_poses_[robot.toStdString()] = {*message, std::chrono::steady_clock::now()};
+      [this, topic](geometry_msgs::msg::Pose::ConstSharedPtr message) {
+        latest_poses_[topic] = {*message, std::chrono::steady_clock::now()};
       });
     *detail = QString("Waiting for current pose on %1").arg(QString::fromStdString(topic));
     return false;
@@ -225,28 +246,26 @@ bool RosGoalsPosesAdapter::currentPose(const QString & robot, const QString & mo
 
 QString RosGoalsPosesAdapter::adapterStatus(const QString & robot, const QString & mode) const
 {
-  const auto root = robot_root(robot);
-  if (!node_ || root.isEmpty()) return "Disconnected · no goal adapter active";
+  if (!node_ || robot != configured_robot_ || mode != configured_mode_ || goal_endpoint_.isEmpty())
+    return "Navigation unavailable · configure endpoints for the selected profile";
+  bool ready = false;
   if (mode == "Simulation") {
     auto * self = const_cast<RosGoalsPosesAdapter *>(this);
-    auto & client = self->nav2_clients_[robot.toStdString()];
-    if (!client) client = rclcpp_action::create_client<NavigateToPose>(node_, root.toStdString() + "/navigate_to_pose");
-    return QString("Simulation profile · Nav2 NavigateToPose · %1 · ground truth %2/ground_truth/pose")
-      .arg(client->action_server_is_ready() ? "ready" : "waiting for verified action server", root);
-  }
-  if (mode == "Hardware") {
-    const auto topic = root.toStdString() + "/move_base_simple/goal";
+    auto & client = self->nav2_clients_[goal_endpoint_.toStdString()];
+    if (!client) client = rclcpp_action::create_client<NavigateToPose>(node_, goal_endpoint_.toStdString());
+    ready = client->action_server_is_ready();
+  } else {
     const auto graph = node_->get_node_graph_interface();
     const auto topics = graph->get_topic_names_and_types();
-    const auto it = topics.find(topic);
-    const bool ready = it != topics.end() &&
-      std::find(it->second.begin(), it->second.end(), "geometry_msgs/msg/PoseStamped") != it->second.end() &&
-      graph->count_subscribers(topic) > 0;
-    return QString("Hardware profile · MiR PoseStamped goal topic · %1 · cancel %2/move_base/cancel")
-      .arg(ready ? "ready" : "waiting for verified goal receiver", root);
+    const auto it = topics.find(goal_endpoint_.toStdString());
+    ready = it != topics.end() && it->second.size() == 1 &&
+      it->second.front() == "geometry_msgs/msg/PoseStamped" &&
+      graph->count_subscribers(goal_endpoint_.toStdString()) > 0;
   }
-  return "Unsupported profile · navigation actions disabled";
+  return QString("%1 navigation · goal %2 (%3) · cancel %4 · pose %5")
+    .arg(mode, goal_endpoint_, ready ? "ready" : "unavailable", mode == "Simulation" ? "Nav2 action" : cancel_endpoint_, pose_endpoint_);
 }
+
 void RosGoalsPosesAdapter::poll()
 {
   for (auto it = nav2_cancels_.begin(); it != nav2_cancels_.end();) {
@@ -493,5 +512,29 @@ bool run_goals_poses_contract_test()
   if (!invalid_file.open(QIODevice::WriteOnly) || invalid_file.write("{\"poses\":[{\"name\":\"good\",\"frame_id\":\"map\",\"x\":1,\"y\":2,\"yaw_deg\":3},{\"name\":\"bad\",\"frame_id\":\"map\",\"x\":1001,\"y\":0,\"yaw_deg\":0}]}") < 0) return false;
   invalid_file.close();
   if (imported.importFile(invalid_path) || imported.poses().size() != 3) return false;
-  return goals.remove("home") && goals.poses().size() == 2;
+  if (!goals.remove("home") || goals.poses().size() != 2) return false;
+
+  // Use a local ROS graph to check that only the configured hardware endpoint is used.
+  rclcpp::init(0, nullptr);
+  bool endpoint_ok = false;
+  {
+    auto node = std::make_shared<rclcpp::Node>("mur_goals_endpoint_contract");
+    int received = 0;
+    auto subscription = node->create_subscription<geometry_msgs::msg::PoseStamped>(
+      "/mur620b/test_goal", 10, [&received](geometry_msgs::msg::PoseStamped::ConstSharedPtr) { ++received; });
+    RosGoalsPosesAdapter ros(node);
+    QString detail;
+    ros.setEndpoints("mur620b", "Hardware", "/mur620d/test_goal", "", "");
+    const bool rejected_other_robot = !ros.sendGoal("mur620b", "Hardware", "map", 1, 2, 0, &detail);
+    ros.setEndpoints("mur620b", "Hardware", "/mur620b/test_goal", "", "");
+    const bool rejected_wrong_mode = !ros.sendGoal("mur620b", "Simulation", "map", 1, 2, 0, &detail);
+    const bool sent = ros.sendGoal("mur620b", "Hardware", "map", 1, 2, 0, &detail);
+    for (int i = 0; i < 100 && !received; ++i) {
+      rclcpp::spin_some(node);
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    endpoint_ok = rejected_other_robot && rejected_wrong_mode && sent && received == 1;
+  }
+  rclcpp::shutdown();
+  return endpoint_ok;
 }

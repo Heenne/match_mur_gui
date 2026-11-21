@@ -171,7 +171,7 @@ Item {
                     Label { text: "Profiles"; color: window.foreground; font.pixelSize: 20; font.bold: true }
                     Label { Layout.fillWidth: true; text: "Edit and save the selected profile. Workspace and RViz paths are machine-local references."; color: window.muted; wrapMode: Text.WordWrap }
                     RowLayout {
-                        Button { text: "Edit profile"; onClicked: { profileName.text = session.preset; profileMode.currentIndex = profileMode.model.indexOf(session.mode); profileTarget.text = session.target; profileDomain.text = String(session.rosDomain); profileRobot.text = session.robot; profileVisualization.currentIndex = profileVisualization.model.indexOf(session.visualization); profileWorkspace.text = session.workspacePath; profileConfig.text = session.configPath; profileGazeboOnStart.checked = session.gazeboViewOnSimulationStart; profileDialog.open() } }
+                        Button { text: "Edit profile"; onClicked: { profileName.text = session.preset; profileMode.currentIndex = profileMode.model.indexOf(session.mode); profileTarget.text = session.target; profileDomain.text = String(session.rosDomain); profileRobot.text = session.robot; profileVisualization.currentIndex = profileVisualization.model.indexOf(session.visualization); profileWorkspace.text = session.workspacePath; profileConfig.text = session.configPath; profileGazeboOnStart.checked = session.gazeboViewOnSimulationStart; navGoal.text = session.navigationGoal; navCancel.text = session.navigationCancel; navPose.text = session.navigationPose; simTopic.text = session.simCommandTopic; mirTopic.text = session.mirCommandTopic; mirType.currentIndex = mirType.model.indexOf(session.mirCommandType); profileDialog.open() } }
                         Button { text: "Export preset…"; onClicked: exportDialog.open() }
                         Button { text: "Import preset…"; onClicked: importFileDialog.open() }
                     }
@@ -209,7 +209,14 @@ Item {
             TextField { id: profileWorkspace; Layout.fillWidth: true; placeholderText: "Workspace path (machine-local)" }
             TextField { id: profileConfig; Layout.fillWidth: true; placeholderText: "RViz config path (machine-local)" }
             CheckBox { id: profileGazeboOnStart; text: "Gazebo world view on simulation start" }
-            Button { text: "Save profile"; Layout.alignment: Qt.AlignRight; onClicked: if (session.saveProfile(profileName.text, profileMode.currentText, profileTarget.text, profileRobot.text, profileVisualization.currentText, profileWorkspace.text, profileConfig.text, Number(profileDomain.text), profileGazeboOnStart.checked)) profileDialog.close() }
+            Label { Layout.fillWidth: true; text: "Navigation: Nav2 action / PoseStamped source in Simulation; MiR goal / cancel / pose topics in Hardware."; color: window.muted; wrapMode: Text.WordWrap }
+            TextField { id: navGoal; Layout.fillWidth: true; placeholderText: "Navigation goal topic or action (optional)" }
+            TextField { id: navCancel; Layout.fillWidth: true; placeholderText: "Hardware navigation cancel topic (optional)" }
+            TextField { id: navPose; Layout.fillWidth: true; placeholderText: "Navigation pose topic (optional)" }
+            TextField { id: simTopic; Layout.fillWidth: true; placeholderText: "Simulation TwistStamped command topic (optional)" }
+            TextField { id: mirTopic; Layout.fillWidth: true; placeholderText: "MiR command topic (optional, absolute)" }
+            ComboBox { id: mirType; Layout.fillWidth: true; model: ["", "geometry_msgs/msg/Twist", "geometry_msgs/msg/TwistStamped"] }
+            Button { text: "Save profile"; Layout.alignment: Qt.AlignRight; onClicked: if (session.validateEndpoints(profileRobot.text, mirTopic.text, mirType.currentText, simTopic.text, navGoal.text, navCancel.text, navPose.text) && session.saveProfile(profileName.text, profileMode.currentText, profileTarget.text, profileRobot.text, profileVisualization.currentText, profileWorkspace.text, profileConfig.text, Number(profileDomain.text), profileGazeboOnStart.checked) && session.setMirEndpoint(mirTopic.text, mirType.currentText) && session.setSimEndpoint(simTopic.text) && session.setNavigationEndpoints(navGoal.text, navCancel.text, navPose.text)) profileDialog.close() }
         }
     }
     NativeDialogs.FileDialog {

@@ -56,14 +56,14 @@ Item {
 
     Component.onCompleted: {
         forceActiveFocus()
-        mirHardwareControl.setContext(session.robot, session.mode, session.target,
-            session.connectionState === "Connected")
+        mirHardwareControl.setContext(session.robot, session.mode, session.preset + "|" + session.target,
+            session.connectionState === "Connected", session.mirCommandTopic, session.mirCommandType)
     }
     Connections {
         target: session
         function onChanged() {
-            mirHardwareControl.setContext(session.robot, session.mode, session.target,
-                session.connectionState === "Connected")
+            mirHardwareControl.setContext(session.robot, session.mode, session.preset + "|" + session.target,
+                session.connectionState === "Connected", session.mirCommandTopic, session.mirCommandType)
         }
     }
     Connections {
@@ -96,7 +96,7 @@ Item {
             }
             Label {
                 Layout.fillWidth: true
-                text: "Jog accepts only a connected Hardware session with a verified /cmd_vel (Twist) or /cmd_vel_stamped (TwistStamped) subscriber. Maximum 0.15 m/s and 0.4 rad/s."
+                text: "Configure the MiR command topic and type in Settings. Jog requires a verified subscriber. Maximum 0.15 m/s and 0.4 rad/s."
                 color: panel.muted
                 wrapMode: Text.WordWrap
             }

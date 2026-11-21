@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 PACKAGE = 'match-mur-gui'
 ROS_PACKAGE = 'match_mur_gui'
 ROS_DEPENDENCY_PREFIX = 'ros-jazzy-'
-BUNDLED_ROS_PACKAGES = {'mir_srvs'}
+BUNDLED_ROS_PACKAGES = {'mir_srvs', 'ewellix_interfaces', 'mur_control'}
 MIR_SRVS_LIBRARIES = (
     'libmir_srvs__rosidl_typesupport_cpp.so',
     'libmir_srvs__rosidl_generator_c.so',
@@ -31,19 +31,18 @@ APP = ('mur-base-gui', 'MuR Basis-GUI', 'MuR-Roboter bedienen',
 MARKER = 'match_mur_gui/scripts/package_deb.py'
 
 
-def runtime_dependencies(package_xml: Path) -> list[str]:
-    root = ET.parse(package_xml).getroot()
+def runtime_dependencies(package_xml: Path, bundled_manifests: tuple[Path, ...] = ()) -> list[str]:
+    roots = [ET.parse(path).getroot() for path in (package_xml, *bundled_manifests)]
     dependencies = set(NATIVE_DEPENDENCIES)
-    for element in root.findall('depend') + root.findall('exec_depend'):
-        key = (element.text or '').strip()
-        if not key:
-            continue
-        if key.startswith(('python3-', 'qml-module-', 'lib')) or key == 'qmlscene':
-            dependencies.add(key)
-        elif key in BUNDLED_ROS_PACKAGES:
-            continue
-        else:
-            dependencies.add(ROS_DEPENDENCY_PREFIX + key.replace('_', '-'))
+    for root in roots:
+        for element in root.findall('depend') + root.findall('exec_depend'):
+            key = (element.text or '').strip()
+            if not key or key in BUNDLED_ROS_PACKAGES:
+                continue
+            if key.startswith(('python3-', 'qml-module-', 'lib')) or key == 'qmlscene':
+                dependencies.add(key)
+            else:
+                dependencies.add(ROS_DEPENDENCY_PREFIX + key.replace('_', '-'))
     dependencies.discard(ROS_DEPENDENCY_PREFIX + ROS_PACKAGE.replace('_', '-'))
     return sorted(dependencies)
 
@@ -107,27 +106,38 @@ def build_deb(source: Path, install_root: Path, output: Path, *, version: str,
         root = Path(temporary)
         shutil.copytree(package_lib, root / 'usr/lib' / ROS_PACKAGE)
         shutil.copytree(install_root / 'share', root / 'usr/share', dirs_exist_ok=True)
-        package_manifest = ET.parse(package_share / 'package.xml').getroot()
-        package_dependencies = {
-            (dependency.text or '').strip()
-            for field in ('depend', 'exec_depend')
-            for dependency in package_manifest.findall(field)
-        }
-        mir_srvs_source = install_root / 'share' / 'mir_srvs' / 'package.xml'
-        if mir_srvs_source.is_file():
-            for library in MIR_SRVS_LIBRARIES:
-                source_library = install_root / 'lib' / library
-                if not source_library.is_file():
-                    raise ValueError(f'Generierte mir_srvs-Laufzeitbibliothek fehlt: {source_library}')
-                shutil.copy2(source_library, root / 'usr/lib' / library)
-        elif 'mir_srvs' in package_dependencies:
-            raise ValueError('mir_srvs ist erforderlich, aber share/mir_srvs/package.xml fehlt im Installationsprefix')
         python_destination = root / 'usr/lib/python3/dist-packages'
         python_destination.mkdir(parents=True)
-        shutil.copytree(python_site_packages / ROS_PACKAGE,
-                        python_destination / ROS_PACKAGE)
-        for metadata in python_site_packages.glob(f'{ROS_PACKAGE}-*.egg-info'):
-            shutil.copytree(metadata, python_destination / metadata.name)
+        for name in (ROS_PACKAGE, *sorted(BUNDLED_ROS_PACKAGES)):
+            manifest = install_root / 'share' / name / 'package.xml'
+            python_package = python_site_packages / name
+            if not manifest.is_file() or not python_package.is_dir():
+                raise ValueError(f'Gebündeltes ROS-Paket fehlt: {name}')
+            shutil.copytree(python_package, python_destination / name)
+            for metadata in python_site_packages.glob(f'{name}-*.egg-info'):
+                shutil.copytree(metadata, python_destination / metadata.name)
+            if name == ROS_PACKAGE:
+                continue
+            index_marker = install_root / 'share/ament_index/resource_index/packages' / name
+            if not index_marker.is_file() or not list(python_package.glob(f'{name}_s__rosidl_typesupport_c*.so')):
+                raise ValueError(f'Generierte {name}-Python-Schnittstelle oder ament-Index fehlt')
+            required = ('rosidl_generator_c', 'rosidl_generator_py', 'rosidl_typesupport_c',
+                        'rosidl_typesupport_cpp', 'rosidl_typesupport_fastrtps_c',
+                        'rosidl_typesupport_fastrtps_cpp', 'rosidl_typesupport_introspection_c',
+                        'rosidl_typesupport_introspection_cpp')
+            for suffix in required:
+                source_library = install_root / 'lib' / f'lib{name}__{suffix}.so'
+                if not source_library.is_file():
+                    raise ValueError(f'Generierte {name}-Laufzeitbibliothek fehlt: {source_library}')
+                shutil.copy2(source_library, root / 'usr/lib' / source_library.name)
+            # mur_control also installs executable helpers and its controller plugin.
+            executable_dir = install_root / 'lib' / name
+            if executable_dir.is_dir():
+                shutil.copytree(executable_dir, root / 'usr/lib' / name)
+        plugin = install_root / 'lib/libintegrated_cartesian_admittance_controller.so'
+        if not plugin.is_file() or not (install_root / 'lib/mur_control').is_dir():
+            raise ValueError('mur_control Plugin oder Laufzeitprogramme fehlen')
+        shutil.copy2(plugin, root / 'usr/lib' / plugin.name)
         launcher = root / 'usr/bin' / APP[0]
         launcher.parent.mkdir(parents=True, exist_ok=True)
         launcher.write_bytes(_launcher())
@@ -146,7 +156,8 @@ def build_deb(source: Path, install_root: Path, output: Path, *, version: str,
 
         control = root / 'DEBIAN/control'
         control.parent.mkdir()
-        depends = ', '.join(runtime_dependencies(package_share / 'package.xml'))
+        depends = ', '.join(runtime_dependencies(package_share / 'package.xml', tuple(
+            install_root / 'share' / name / 'package.xml' for name in sorted(BUNDLED_ROS_PACKAGES))))
         control.write_text(
             f'Package: {PACKAGE}\nVersion: {version}\nArchitecture: {architecture}\n'
             'Maintainer: MuR GUI maintainers <rosmatch@match.uni-hannover.de>\n'

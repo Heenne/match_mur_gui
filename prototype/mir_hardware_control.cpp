@@ -229,20 +229,22 @@ MirHardwareControl::MirHardwareControl(std::shared_ptr<MirHardwareAdapter> adapt
 }
 
 void MirHardwareControl::setContext(const QString & robot, const QString & mode,
-  const QString & target, bool connected)
+  const QString & target, bool connected, const QString & topic, const QString & type)
 {
   const auto selected = robot.trimmed();
   static const QRegularExpression robot_segment("^[A-Za-z_][A-Za-z0-9_]*$");
   const bool valid_robot = robot_segment.match(selected).hasMatch() && !target.trimmed().isEmpty();
   const bool next_hardware_mode = mode == "Hardware";
   if (selected != robot_ || mode != (hardware_mode_ ? "Hardware" : "Simulation") ||
-    target != target_ || connected != context_connected_) {
+    target != target_ || connected != context_connected_ || topic != configured_topic_ || type != configured_type_) {
     stop("session context changed");
     light_timeout_timer_.stop();
     ++light_request_id_;
     armed_ = false;
     robot_ = valid_robot ? selected : QString();
     target_ = target.trimmed();
+    configured_topic_ = topic;
+    configured_type_ = type;
     context_key_ = mode + "|" + target_ + "|" + robot_;
     hardware_mode_ = next_hardware_mode;
     context_connected_ = connected;
@@ -257,9 +259,9 @@ void MirHardwareControl::setArmed(bool armed)
 {
   const bool can_arm = !robot_.isEmpty() && hardware_mode_ && context_connected_ &&
     adapter_ && adapter_->connected();
-  if (armed && !can_arm) {
+  if (armed && (!can_arm || !selectEndpoint())) {
     armed_ = false;
-    setStatus("Cannot arm · select and connect one Hardware robot first");
+    setStatus("Cannot arm · configure a verified MiR command endpoint for the connected Hardware robot");
   } else {
     armed_ = armed;
     setStatus(armed ? "Armed · hold a direction to jog the selected MiR" : "MiR jog disarmed");
@@ -296,7 +298,9 @@ bool MirHardwareControl::press(const QString & direction)
   else return false;
   if (!selectEndpoint() || !send(linear_x_, angular_z_)) {
     clearHold();
-    setStatus(QString("Unavailable · no compatible Twist subscriber on %1/cmd_vel or %1/cmd_vel_stamped")
+    armed_ = false;
+    emit changed();
+    setStatus(QString("Unavailable · configure and verify the MiR command endpoint for %1 in Settings")
       .arg(QString::fromStdString("/" + robot_.toStdString())));
     return false;
   }
@@ -346,16 +350,17 @@ bool MirHardwareControl::selectEndpoint()
 {
   command_topic_.clear();
   if (!adapter_ || !adapter_->connected() || robot_.isEmpty()) return false;
+  static const QRegularExpression valid_topic("^/[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)+$");
+  if (!valid_topic.match(configured_topic_).hasMatch() ||
+    !configured_topic_.startsWith("/" + robot_ + "/") ||
+    (configured_type_ != QString::fromStdString(kTwistType) &&
+    configured_type_ != QString::fromStdString(kTwistStampedType))) return false;
   try {
-    const auto plain = topicFor(robot_, "cmd_vel");
-    const auto stamped = topicFor(robot_, "cmd_vel_stamped");
-    const auto plain_endpoint = adapter_->inspectTopic(plain);
-    const auto stamped_endpoint = adapter_->inspectTopic(stamped);
-    const bool plain_ok = plain_endpoint.type == kTwistType && plain_endpoint.subscribers > 0;
-    const bool stamped_ok = stamped_endpoint.type == kTwistStampedType && stamped_endpoint.subscribers > 0;
-    if (plain_ok == stamped_ok) return false;
-    command_stamped_ = stamped_ok;
-    command_topic_ = stamped_ok ? stamped : plain;
+    const auto topic = configured_topic_.toStdString();
+    const auto endpoint = adapter_->inspectTopic(topic);
+    if (endpoint.type != configured_type_.toStdString() || endpoint.subscribers == 0) return false;
+    command_stamped_ = endpoint.type == kTwistStampedType;
+    command_topic_ = topic;
     return true;
   } catch (const std::exception &) { return false; }
 }
@@ -457,10 +462,10 @@ bool run_mir_hardware_control_contract_test()
 #define VERIFY_MIR(condition) do { if (!(condition)) { qCritical("MiR control assertion failed at line %d", __LINE__); return false; } } while (false)
   auto adapter = std::make_shared<FakeMirHardwareAdapter>();
   MirHardwareControl control(adapter);
-  control.setContext("mur620d", "Hardware", "lab-host", true);
+  control.setContext("mur620d", "Hardware", "lab-host", true, "/mur620d/cmd_vel", "geometry_msgs/msg/Twist");
   VERIFY_MIR(!control.armed() && !control.press("forward") && adapter->commands.empty());
   control.setArmed(true);
-  VERIFY_MIR(control.armed() && !control.press("forward") && adapter->commands.empty());
+  VERIFY_MIR(!control.armed() && !control.press("forward") && adapter->commands.empty());
   adapter->topics["/mur620d/cmd_vel"] = {kTwistType, 1};
   control.setArmed(true);
   control.setLinearSpeed(0.8);
@@ -476,6 +481,7 @@ bool run_mir_hardware_control_contract_test()
   waitForEvents(120);
   VERIFY_MIR(!control.holding() && !control.armed() &&
     adapter->commands.back().name == "/mur620d/cmd_vel" && adapter->commands.back().linear == 0.0);
+  control.setContext("mur620d", "Hardware", "lab-host", true, "/mur620d/cmd_vel_stamped", "geometry_msgs/msg/TwistStamped");
   control.setArmed(true);
 
   adapter->topics.erase("/mur620d/cmd_vel");
@@ -490,8 +496,10 @@ bool run_mir_hardware_control_contract_test()
   VERIFY_MIR(!control.press("forward") && !control.holding());
   adapter->topics["/mur620d/cmd_vel_stamped"].subscribers = 1;
   adapter->topics["/mur620d/cmd_vel_stamped"].type = "geometry_msgs/msg/Twist";
+  control.setArmed(true);
   VERIFY_MIR(!control.press("forward"));
   adapter->topics["/mur620d/cmd_vel_stamped"].type = kTwistStampedType;
+  control.setArmed(true);
   VERIFY_MIR(!control.press("invalid"));
   VERIFY_MIR(control.press("forward"));
   control.setContext("mur620b", "Hardware", "lab-host", true);

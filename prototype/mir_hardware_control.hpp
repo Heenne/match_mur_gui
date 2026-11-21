@@ -78,7 +78,7 @@ public:
   double angularSpeed() const { return angular_speed_; }
 
   Q_INVOKABLE void setContext(const QString & robot, const QString & mode,
-    const QString & target, bool connected);
+    const QString & target, bool connected, const QString & topic = {}, const QString & type = {});
   Q_INVOKABLE void setArmed(bool armed);
   Q_INVOKABLE void setLinearSpeed(double speed);
   Q_INVOKABLE void setAngularSpeed(double speed);
@@ -112,6 +112,8 @@ private:
   QString robot_;
   QString target_;
   QString context_key_;
+  QString configured_topic_;
+  QString configured_type_;
   bool hardware_mode_{false};
   bool context_connected_{false};
   bool armed_{false};

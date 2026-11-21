@@ -22,13 +22,24 @@ def test_deb_has_menu_entry_icon_launcher_and_ros_dependencies(tmp_path):
     (lib / 'general_mur_gui.py').write_text('#!/usr/bin/env python3\n')
     (python_package / '__init__.py').write_text('')
     (share / 'package.xml').write_text((ROOT / 'package.xml').read_text())
-    mir_share = install_root / 'share/mir_srvs'
-    mir_share.mkdir(parents=True)
-    (mir_share / 'package.xml').write_text('<package><name>mir_srvs</name></package>')
-    (install_root / 'share/ament_index/resource_index/packages').mkdir(parents=True)
-    (install_root / 'share/ament_index/resource_index/packages/mir_srvs').write_text('')
-    for library in PACKAGE.MIR_SRVS_LIBRARIES:
-        (install_root / 'lib' / library).write_text('fake shared library')
+    for name in sorted(PACKAGE.BUNDLED_ROS_PACKAGES):
+        dependency_share = install_root / 'share' / name
+        dependency_share.mkdir(parents=True)
+        (dependency_share / 'package.xml').write_text(f'<package><name>{name}</name><exec_depend>rosidl_default_runtime</exec_depend></package>')
+        index = install_root / 'share/ament_index/resource_index/packages'
+        index.mkdir(parents=True, exist_ok=True)
+        (index / name).write_text('')
+        generated = install_root / 'lib/python3.12/site-packages' / name
+        generated.mkdir()
+        (generated / '__init__.py').write_text('')
+        (generated / f'{name}_s__rosidl_typesupport_c.so').write_text('fake extension')
+        for suffix in ('rosidl_generator_c', 'rosidl_generator_py', 'rosidl_typesupport_c',
+                       'rosidl_typesupport_cpp', 'rosidl_typesupport_fastrtps_c',
+                       'rosidl_typesupport_fastrtps_cpp', 'rosidl_typesupport_introspection_c',
+                       'rosidl_typesupport_introspection_cpp'):
+            (install_root / 'lib' / f'lib{name}__{suffix}.so').write_text('fake shared library')
+    (install_root / 'lib/libintegrated_cartesian_admittance_controller.so').write_text('fake plugin')
+    (install_root / 'lib/mur_control').mkdir()
     output = tmp_path / 'match-mur-gui.deb'
 
     PACKAGE.build_deb(ROOT, install_root, output, version='1.2.3', architecture='amd64')
@@ -51,7 +62,12 @@ def test_deb_has_menu_entry_icon_launcher_and_ros_dependencies(tmp_path):
     assert 'Version: 1.2.3' in fields
     assert 'Architecture: amd64' in fields
     assert 'ros-jazzy-rclpy' in fields
-    assert 'ros-jazzy-ewellix-interfaces' in fields
+    assert 'ros-jazzy-ewellix-interfaces' not in fields
+    assert 'ros-jazzy-mur-control' not in fields
+    assert 'ros-jazzy-rosidl-default-runtime' in fields
+    for name in PACKAGE.BUNDLED_ROS_PACKAGES:
+        assert f'./usr/lib/python3/dist-packages/{name}/__init__.py' in contents
+        assert f'./usr/lib/lib{name}__rosidl_generator_py.so' in contents
     assert 'qml-module-qtquick-controls2' in fields
     assert 'ros-jazzy-mir-srvs' not in fields
 

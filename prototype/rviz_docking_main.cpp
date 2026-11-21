@@ -158,6 +158,12 @@ class SessionController : public QObject
   Q_PROPERTY(QString visualization READ visualization NOTIFY changed)
   Q_PROPERTY(QString workspacePath READ workspacePath NOTIFY changed)
   Q_PROPERTY(QString configPath READ configPath NOTIFY changed)
+  Q_PROPERTY(QString navigationGoal READ navigationGoal NOTIFY changed)
+  Q_PROPERTY(QString navigationCancel READ navigationCancel NOTIFY changed)
+  Q_PROPERTY(QString navigationPose READ navigationPose NOTIFY changed)
+  Q_PROPERTY(QString simCommandTopic READ simCommandTopic NOTIFY changed)
+  Q_PROPERTY(QString mirCommandTopic READ mirCommandTopic NOTIFY changed)
+  Q_PROPERTY(QString mirCommandType READ mirCommandType NOTIFY changed)
   Q_PROPERTY(bool useSimTime READ useSimTime NOTIFY changed)
   Q_PROPERTY(bool gazeboViewOnSimulationStart READ gazeboViewOnSimulationStart NOTIFY changed)
   Q_PROPERTY(bool simulationServerAvailable READ simulationServerAvailable NOTIFY changed)
@@ -194,6 +200,19 @@ public:
   QString visualization() const { return value("visualization", "RViz"); }
   QString workspacePath() const { return value("workspacePath", ""); }
   QString configPath() const { return value("configPath", ""); }
+  QString navigationGoal() const { return value("navigationMode", "") == mode() ? value("navigationGoal", "") : QString(); }
+  QString navigationCancel() const { return value("navigationMode", "") == mode() ? value("navigationCancel", "") : QString(); }
+  QString navigationPose() const { return value("navigationMode", "") == mode() ? value("navigationPose", "") : QString(); }
+  QString simCommandTopic() const { return value("simCommandTopic", ""); }
+  QString mirCommandTopic() const { return value("mirCommandTopic", ""); }
+  QString mirCommandType() const { return value("mirCommandType", ""); }
+  static bool validMirEndpoint(const QString & topic, const QString & type, const QString & robot)
+  {
+    if (topic.isEmpty() && type.isEmpty()) return true;
+    static const QRegularExpression valid("^/[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)+$");
+    return valid.match(topic).hasMatch() && topic.startsWith("/" + robot + "/") &&
+      (type == "geometry_msgs/msg/Twist" || type == "geometry_msgs/msg/TwistStamped");
+  }
   QString rvizConfigPath(const QString & command_line_override) const
   {
     return command_line_override.trimmed().isEmpty() ? configPath().trimmed() : command_line_override.trimmed();
@@ -338,6 +357,62 @@ public slots:
     emit changed();
     return true;
   }
+  Q_INVOKABLE bool validateEndpoints(const QString &robot, const QString &mir_topic, const QString &mir_type,
+    const QString &sim_topic, const QString &goal, const QString &cancel, const QString &pose)
+  {
+    const auto valid_topic = [&](const QString &topic) {
+      const auto clean = topic.trimmed();
+      return validMirEndpoint(clean, clean.isEmpty() ? "" : "geometry_msgs/msg/Twist", robot.trimmed());
+    };
+    if (!validMirEndpoint(mir_topic.trimmed(), mir_type, robot.trimmed()) ||
+      !valid_topic(sim_topic) || !valid_topic(goal) || !valid_topic(cancel) || !valid_topic(pose)) {
+      setError("Endpoints must be valid absolute topics under the selected robot; MiR also needs a supported Twist type.");
+      return false;
+    }
+    return true;
+  }
+  Q_INVOKABLE bool setNavigationEndpoints(const QString &goal, const QString &cancel, const QString &pose)
+  {
+    for (const auto &topic : {goal.trimmed(), cancel.trimmed(), pose.trimmed()}) {
+      if (!validMirEndpoint(topic, topic.isEmpty() ? "" : "geometry_msgs/msg/Twist", robot())) {
+        setError("Navigation endpoints must be empty or valid topics under the selected robot.");
+        return false;
+      }
+    }
+    settings_->setValue(key("navigationMode"), mode());
+    settings_->setValue(key("navigationGoal"), goal.trimmed());
+    settings_->setValue(key("navigationCancel"), cancel.trimmed());
+    settings_->setValue(key("navigationPose"), pose.trimmed());
+    settings_->sync();
+    clearError();
+    emit changed();
+    return true;
+  }
+  Q_INVOKABLE bool setSimEndpoint(const QString &topic)
+  {
+    if (!validMirEndpoint(topic.trimmed(), topic.trimmed().isEmpty() ? "" : "geometry_msgs/msg/TwistStamped", robot())) {
+      setError("Simulation command topic must be empty or a valid topic under the selected robot.");
+      return false;
+    }
+    settings_->setValue(key("simCommandTopic"), topic.trimmed());
+    settings_->sync();
+    clearError();
+    emit changed();
+    return true;
+  }
+  Q_INVOKABLE bool setMirEndpoint(const QString &topic, const QString &type)
+  {
+    if (!validMirEndpoint(topic.trimmed(), type, robot())) {
+      setError("MiR command endpoint must be empty or a valid topic under the selected robot with a supported Twist type.");
+      return false;
+    }
+    settings_->setValue(key("mirCommandTopic"), topic.trimmed());
+    settings_->setValue(key("mirCommandType"), type);
+    settings_->sync();
+    clearError();
+    emit changed();
+    return true;
+  }
   Q_INVOKABLE bool exportPreset(const QString &path)
   {
     QJsonObject profile;
@@ -348,6 +423,12 @@ public slots:
     profile.insert("robot", robot());
     profile.insert("visualization", visualization());
     profile.insert("gazeboViewOnSimulationStart", gazeboViewOnSimulationStart());
+    profile.insert("navigationGoal", navigationGoal());
+    profile.insert("navigationCancel", navigationCancel());
+    profile.insert("navigationPose", navigationPose());
+    profile.insert("simCommandTopic", simCommandTopic());
+    profile.insert("mirCommandTopic", mirCommandTopic());
+    profile.insert("mirCommandType", mirCommandType());
     profile.insert("requiresWorkspaceMapping", !workspacePath().trimmed().isEmpty());
     profile.insert("requiresConfigMapping", !configPath().trimmed().isEmpty());
     QJsonObject bundle;
@@ -389,11 +470,28 @@ public slots:
     const auto domain = profile.contains("rosDomain") ? profile.value("rosDomain").toInt(-1) : 62;
     const auto robot = profile.value("robot").toString().trimmed();
     const auto visualization = profile.value("visualization").toString();
+    const auto nav_goal = profile.value("navigationGoal").toString();
+    const auto nav_cancel = profile.value("navigationCancel").toString();
+    const auto nav_pose = profile.value("navigationPose").toString();
+    const auto sim_topic = profile.value("simCommandTopic").toString();
+    const auto mir_topic = profile.value("mirCommandTopic").toString();
+    const auto mir_type = profile.value("mirCommandType").toString();
     const auto gazebo_view_on_simulation_start = profile.value("gazeboViewOnSimulationStart").toBool(false);
     if (bundle.value("format").toString() != "mur-command-center-preset" ||
       bundle.value("version").toInt(-1) != 1 || name.isEmpty() ||
       (mode != "Simulation" && mode != "Hardware") || target.isEmpty() || robot.isEmpty() ||
       !valid_remote_host(target) || domain < 0 || domain > 232 ||
+      (profile.contains("navigationGoal") && !profile.value("navigationGoal").isString()) ||
+      (profile.contains("navigationCancel") && !profile.value("navigationCancel").isString()) ||
+      (profile.contains("navigationPose") && !profile.value("navigationPose").isString()) ||
+      (profile.contains("simCommandTopic") && !profile.value("simCommandTopic").isString()) ||
+      (profile.contains("mirCommandTopic") && !profile.value("mirCommandTopic").isString()) ||
+      (profile.contains("mirCommandType") && !profile.value("mirCommandType").isString()) ||
+      !validMirEndpoint(nav_goal, nav_goal.isEmpty() ? "" : "geometry_msgs/msg/Twist", robot) ||
+      !validMirEndpoint(nav_cancel, nav_cancel.isEmpty() ? "" : "geometry_msgs/msg/Twist", robot) ||
+      !validMirEndpoint(nav_pose, nav_pose.isEmpty() ? "" : "geometry_msgs/msg/Twist", robot) ||
+      !validMirEndpoint(mir_topic, mir_type, robot) ||
+      !validMirEndpoint(sim_topic, sim_topic.isEmpty() ? "" : "geometry_msgs/msg/TwistStamped", robot) ||
       (visualization != "RViz" && visualization != "MuR data view") ||
       !profile.value("requiresWorkspaceMapping").isBool() ||
       !profile.value("requiresConfigMapping").isBool()) {
@@ -403,8 +501,10 @@ public slots:
     // Bundles contain only mapping-required flags; machine-local absolute paths never leave this host.
     const auto workspace = profile.value("requiresWorkspaceMapping").toBool() ? workspace_mapping.trimmed() : QString();
     const auto config = profile.value("requiresConfigMapping").toBool() ? config_mapping.trimmed() : QString();
-    return saveProfile(name, mode, target, robot, visualization, workspace, config, domain,
-      gazebo_view_on_simulation_start);
+    if (!saveProfile(name, mode, target, robot, visualization, workspace, config, domain,
+      gazebo_view_on_simulation_start)) return false;
+    return setMirEndpoint(mir_topic, mir_type) && setSimEndpoint(sim_topic) &&
+      setNavigationEndpoints(nav_goal, nav_cancel, nav_pose);
   }
   void selectView(const QString &view)
   {
@@ -970,6 +1070,11 @@ bool run_portable_preset_contract_test()
     SessionController session;
     if (!session.saveProfile("Portable lab", "Hardware", "lab-host", "mur620b",
       "MuR data view", "/old/workspace", "/old/config.rviz", 87)) return false;
+    if (!session.setMirEndpoint("/mur620b/cmd_vel", "geometry_msgs/msg/Twist") ||
+      !session.setSimEndpoint("/mur620b/mobile_base_controller/cmd_vel") ||
+      !session.setNavigationEndpoints("/mur620b/move_base_simple/goal", "/mur620b/move_base/cancel", "/mur620b/robot_pose") ||
+      session.setMirEndpoint("/mur620d/cmd_vel", "geometry_msgs/msg/Twist") ||
+      session.setSimEndpoint("/mur620b/bad-name")) return false;
     session.selectView("Logs");
     if (!session.exportPreset(bundle_path)) return false;
     QFile exported(bundle_path);
@@ -994,7 +1099,12 @@ bool run_portable_preset_contract_test()
       session.preset() != "Portable lab" || session.mode() != "Hardware" ||
       session.target() != "lab-host" || session.rosDomain() != 87 || session.robot() != "mur620b" ||
       session.visualization() != "MuR data view" || session.workspacePath() != "/new/workspace" ||
-      session.configPath() != "/new/config.rviz") return false;
+      session.configPath() != "/new/config.rviz" ||
+      session.mirCommandTopic() != "/mur620b/cmd_vel" || session.mirCommandType() != "geometry_msgs/msg/Twist" ||
+      session.simCommandTopic() != "/mur620b/mobile_base_controller/cmd_vel" ||
+      session.navigationGoal() != "/mur620b/move_base_simple/goal" ||
+      session.navigationCancel() != "/mur620b/move_base/cancel" ||
+      session.navigationPose() != "/mur620b/robot_pose") return false;
     if (!session.importPreset(bundle_path, "", "") || !session.workspacePath().isEmpty() ||
       !session.configPath().isEmpty()) return false;
     if (session.importPreset(directory.filePath("missing.json"), "", "") || session.lastError().isEmpty()) return false;
@@ -1004,6 +1114,13 @@ bool run_portable_preset_contract_test()
   invalid.write("{\"format\":\"mur-command-center-preset\",\"version\":99}");
   invalid.close();
   SessionController restored;
+  if (restored.mirCommandTopic() != "/mur620b/cmd_vel" ||
+    restored.simCommandTopic() != "/mur620b/mobile_base_controller/cmd_vel" ||
+    restored.navigationGoal() != "/mur620b/move_base_simple/goal") return false;
+  restored.selectMode("Simulation");
+  if (!restored.navigationGoal().isEmpty()) return false;
+  restored.selectMode("Hardware");
+  if (restored.navigationGoal() != "/mur620b/move_base_simple/goal") return false;
   return !restored.importPreset(invalid_path, "", "") &&
     restored.lastError().contains("Unsupported or invalid");
 }
@@ -1387,7 +1504,8 @@ public:
     command_center->rootContext()->setContextProperty("simBaseJog", sim_base_jog_);
     command_center->rootContext()->setContextProperty("goalsPoses", goals_poses_);
     command_center->rootContext()->setContextProperty("mirHardwareControl", mir_hardware_control_);
-    mir_hardware_control_->setContext(session_->robot(), session_->mode(), session_->target(), false);
+    mir_hardware_control_->setContext(session_->robot(), session_->mode(), session_->preset() + "|" + session_->target(), false,
+      session_->mirCommandTopic(), session_->mirCommandType());
     command_center->rootContext()->setContextProperty("mocap", mocap_);
     command_center->rootContext()->setContextProperty("urArmJog", ur_arm_jog_);
     command_center->rootContext()->setContextProperty("liftController", lift_controller_);
@@ -1494,16 +1612,18 @@ public:
         session_->connectionState() == "Connected", session_->preset());
       ur_arm_jog_->setContext(session_->robot(), session_->mode(), session_context(),
         session_->connectionState() == "Connected");
+      goals_poses_adapter_->setEndpoints(session_->robot(), session_->mode(), session_->navigationGoal(),
+        session_->navigationCancel(), session_->navigationPose());
       goals_poses_->setConnected(session_->connectionState() == "Connected" &&
         (session_->mode() == "Hardware" || session_->mode() == "Simulation"));
-      mir_hardware_control_->setContext(session_->robot(), session_->mode(), session_->target(),
-        session_->connectionState() == "Connected");
+      mir_hardware_control_->setContext(session_->robot(), session_->mode(), session_->preset() + "|" + session_->target(),
+        session_->connectionState() == "Connected", session_->mirCommandTopic(), session_->mirCommandType());
       setWindowTitle(QString("MuR Command Center · %1 · %2 · %3")
         .arg(session_->mode(), session_->preset(), session_->robot()));
       if (rviz_dock_) rviz_dock_->setWindowTitle("Visualisierung · " + session_label());
       if (logs_dock_) logs_dock_->setWindowTitle("Logs · " + session_label());
       if (log_panel_) log_panel_->setSessionLabel(session_label());
-      statusBar()->showMessage(QString("%1 · %2 · %3 · %4 · No processes started")
+      statusBar()->showMessage(QString("%1 · %2 · %3 · %4")
         .arg(session_->target(), session_->robot(), session_->mode(), session_->connectionState()));
     });
 

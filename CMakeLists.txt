@@ -124,6 +124,8 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_deb_package test/test_deb_package.py)
 endif()
 
+install(DIRECTORY assets/ DESTINATION share/${PROJECT_NAME}/assets)
+
 install(DIRECTORY prototype
   DESTINATION share/${PROJECT_NAME}
 )

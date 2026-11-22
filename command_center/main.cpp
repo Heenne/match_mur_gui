@@ -6,7 +6,9 @@
 #include <utility>
 
 #include <QApplication>
+#include <QFontDatabase>
 #include "app_theme.hpp"
+#include "ui_preferences.hpp"
 #include <QCursor>
 #include <QDockWidget>
 #include <QFileInfo>
@@ -17,6 +19,8 @@
 #include <QMainWindow>
 #include <QPlainTextEdit>
 #include <QQmlContext>
+#include <QQmlEngine>
+#include <QQmlPropertyMap>
 #include <QQuickItem>
 #include <QQuickWidget>
 #include <QQuickWindow>
@@ -35,7 +39,9 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QCloseEvent>
+#include <QCheckBox>
 #include <QElapsedTimer>
+#include <QMouseEvent>
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QScopeGuard>
@@ -43,10 +49,13 @@
 #include <cstdlib>
 
 #include "ament_index_cpp/get_package_share_directory.hpp"
+#include "ament_index_cpp/get_package_prefix.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/executors/single_threaded_executor.hpp"
 #include "rviz_common/ros_integration/ros_node_abstraction.hpp"
 #include "rviz_common/config.hpp"
+#include "rviz_common/display.hpp"
+#include "rviz_common/visualization_manager.hpp"
 #include "rviz_common/visualization_frame.hpp"
 #include "rviz_common/yaml_config_reader.hpp"
 #include "ros_session_monitor.hpp"
@@ -174,6 +183,10 @@ class SessionController : public QObject
   Q_PROPERTY(QString mirCommandType READ mirCommandType NOTIFY changed)
   Q_PROPERTY(bool useSimTime READ useSimTime NOTIFY changed)
   Q_PROPERTY(bool gazeboViewOnSimulationStart READ gazeboViewOnSimulationStart NOTIFY changed)
+  Q_PROPERTY(QString simulationWorldFile READ simulationWorldFile NOTIFY changed)
+  Q_PROPERTY(QString simulationMapFile READ simulationMapFile NOTIFY changed)
+  Q_PROPERTY(QStringList customSimulationWorlds READ customSimulationWorlds NOTIFY changed)
+  Q_PROPERTY(QVariantList simulationFlows READ simulationFlows NOTIFY changed)
   Q_PROPERTY(bool simulationServerAvailable READ simulationServerAvailable NOTIFY changed)
   Q_PROPERTY(QString lastError READ lastError NOTIFY changed)
   Q_PROPERTY(QString view READ view NOTIFY changed)
@@ -212,6 +225,19 @@ public:
   QString navigationCancel() const { return value("navigationMode", "") == mode() ? value("navigationCancel", "") : QString(); }
   QString navigationPose() const { return value("navigationMode", "") == mode() ? value("navigationPose", "") : QString(); }
   QString simCommandTopic() const { return value("simCommandTopic", ""); }
+  QString simulationWorldFile() const { return value("simulationWorldFile", ""); }
+  QString simulationMapFile() const { return value("simulationMapFile", ""); }
+  QVariantList simulationFlows() const { return settings_->value("simulation/flows").toList(); }
+  Q_INVOKABLE void saveSimulationFlows(const QVariantList & flows)
+  {
+    settings_->setValue("simulation/flows", flows);
+    settings_->sync();
+    emit changed();
+  }
+  QStringList customSimulationWorlds() const
+  {
+    return settings_->value("simulation/customWorlds").toStringList();
+  }
   QString mirCommandTopic() const { return value("mirCommandTopic", ""); }
   QString mirCommandType() const { return value("mirCommandType", ""); }
   static bool validMirEndpoint(const QString & topic, const QString & type, const QString & robot)
@@ -221,8 +247,20 @@ public:
     return valid.match(topic).hasMatch() && topic.startsWith("/" + robot + "/") &&
       (type == "geometry_msgs/msg/Twist" || type == "geometry_msgs/msg/TwistStamped");
   }
+  bool usesDefaultSimulationRviz(const QString & command_line_override) const
+  {
+    return mode() == "Simulation" && command_line_override.trimmed().isEmpty() && configPath().trimmed().isEmpty();
+  }
   QString rvizConfigPath(const QString & command_line_override) const
   {
+    if (usesDefaultSimulationRviz(command_line_override)) {
+      try {
+        return QString::fromStdString(ament_index_cpp::get_package_share_directory("match_mur_gui")) +
+          "/assets/simulation.rviz";
+      } catch (const ament_index_cpp::PackageNotFoundError &) {
+        return {};
+      }
+    }
     return command_line_override.trimmed().isEmpty() ? configPath().trimmed() : command_line_override.trimmed();
   }
   bool useSimTime() const { return mode() == "Simulation"; }
@@ -321,6 +359,34 @@ public slots:
     emit changed();
   }
   void selectRobot(const QString &robot) { setValue("robot", robot); }
+  Q_INVOKABLE void selectSimulationRobot(const QString &robot)
+  {
+    static const QRegularExpression valid_robot("^mur620[a-d]$");
+    if (mode() != "Simulation" || !valid_robot.match(robot).hasMatch()) return;
+    selectRobot(robot);
+    if (!simCommandTopic().startsWith("/" + robot + "/")) {
+      setSimEndpoint("/" + robot + "/mobile_base_controller/cmd_vel");
+    }
+    selectView("Robot");
+  }
+  Q_INVOKABLE void setSimulationWorldFiles(const QString &world, const QString &map)
+  {
+    settings_->setValue(key("simulationWorldFile"), world);
+    settings_->setValue(key("simulationMapFile"), map);
+    settings_->sync();
+    emit changed();
+  }
+  Q_INVOKABLE void addSimulationWorld(const QString &file)
+  {
+    const auto path = QUrl(file).toLocalFile();
+    if (!QFileInfo(path).isFile()) return;
+    auto worlds = customSimulationWorlds();
+    if (!worlds.contains(path)) {
+      worlds.append(path);
+      settings_->setValue("simulation/customWorlds", worlds);
+    }
+    setSimulationWorldFiles(path, path == simulationWorldFile() ? simulationMapFile() : QString());
+  }
   Q_INVOKABLE void setGazeboViewOnSimulationStart(bool enabled)
   {
     settings_->setValue(key("gazeboViewOnSimulationStart"), enabled);
@@ -553,7 +619,7 @@ private:
   QString connection_state_{"Disconnected"};
   QString last_error_;
   QString discovery_route_;
-  QStringList diagnostics_{"Not connected · choose Connect to inspect the existing ROS graph"};
+  QStringList diagnostics_{QT_TRANSLATE_NOOP("CommandCenter", "Not connected · choose Connect to inspect the existing ROS graph")};
   bool simulation_server_available_{false};
 };
 
@@ -574,6 +640,7 @@ bool run_session_contract_test()
       "Clock: missing (/clock has no publisher)"};
     session.setDiagnostics(expected_diagnosis);
     if (session.diagnostics() != expected_diagnosis) return false;
+    session.setSimulationWorldFiles("/test custom world.sdf", "/test custom map.yaml");
     session.selectView("Visualization");
     session.selectMode("Hardware");
     session.selectTarget("sim-host");
@@ -593,6 +660,12 @@ bool run_session_contract_test()
     restored.selectPreset("Local simulation");
     if (restored.view() != "Visualization" || restored.mode() != "Hardware" ||
       restored.target() != "sim-host" || restored.robot() != "mur620b") return false;
+    if (restored.simulationWorldFile() != "/test custom world.sdf" ||
+      restored.simulationMapFile() != "/test custom map.yaml") return false;
+    restored.selectMode("Simulation");
+    restored.selectSimulationRobot("mur620a");
+    if (restored.view() != "Robot" || restored.robot() != "mur620a" ||
+      restored.simCommandTopic() != "/mur620a/mobile_base_controller/cmd_vel") return false;
   }
   return !rclcpp::ok();
 }
@@ -1213,7 +1286,10 @@ bool run_rviz_session_contract_test()
   if (alternate_domain_context == alternate_host_context) return false;
   session.selectRosDomain(previous_domain);
 
-  if (!session.saveProfile("Missing view", "Simulation", "localhost", "mur620d", "RViz", "", "", session.rosDomain()) ||
+  if (!session.saveProfile("Default simulation view", "Simulation", "localhost", "mur620d", "RViz",
+    "", "", session.rosDomain()) || !session.usesDefaultSimulationRviz("") ||
+    !session.validateRvizProfile("", &error)) return false;
+  if (!session.saveProfile("Missing view", "Hardware", "localhost", "mur620d", "RViz", "", "", session.rosDomain()) ||
     session.validateRvizProfile("", &error) || !error.contains("no RViz configuration")) return false;
   if (!session.saveProfile("Empty view", "Hardware", "localhost", "mur620d", "RViz", "", empty_path, session.rosDomain()) ||
     session.validateRvizProfile("", &error) || !error.contains("is empty")) return false;
@@ -1417,7 +1493,49 @@ bool run_process_manager_contract_test()
         manager.probeGazeboServer();
         if (!wait_for_gazebo_status("Not found") || manager.startGazeboView()) return false;
         manager.stopProcess("fake simulation server");
-        return true;
+
+        QTemporaryDir files;
+        const auto world_path = files.filePath("test world.sdf");
+        QFile world_file(world_path);
+        if (!world_file.open(QIODevice::WriteOnly)) return false;
+        world_file.write("<sdf version='1.7'><world name='fleet_test'/></sdf>");
+        world_file.close();
+        if (!manager.startSimulationWorld(world_path, "", 83) || manager.simulationDomain() != 83 ||
+          manager.spawnSimulationRobot("mur620a", "mir", 0, 0, 0)) return false;
+        manager.probeGazeboServer();
+        if (!wait_for_gazebo_status("Available")) return false;
+        const QStringList robots{"mur620a", "mur620b", "mur620c", "mur620d"};
+        for (int index = 0; index < robots.size(); ++index) {
+          if (!manager.spawnSimulationRobot(robots.at(index), index % 2 ? "mur620" : "mir", index * 2, 0, 0)) {
+            return false;
+          }
+        }
+        if (manager.spawnSimulationRobot("mur620a", "mur620", 0, 0, 0) ||
+          manager.spawnSimulationRobot("mur620e", "mir", 0, 0, 0)) return false;
+        const auto wait_for_process = [&manager](const QString & name, const QString & state) {
+          QElapsedTimer timeout;
+          timeout.start();
+          while (timeout.elapsed() < 5000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            for (const auto & item : manager.processes()) {
+              const auto row = item.toMap();
+              if (row.value("name").toString() == name && row.value("state").toString() == state) return true;
+            }
+          }
+          qCritical("Fleet process '%s' did not reach '%s'", qPrintable(name), qPrintable(state));
+          return false;
+        };
+        manager.stopProcess("Simulation · mur620b");
+        if (!wait_for_process("Simulation · mur620b", "Stopped") ||
+          !wait_for_process("Simulation · mur620a", "Running") ||
+          !wait_for_process("Gazebo simulation world", "Running") ||
+          !manager.spawnSimulationRobot("mur620b", "mir", 2, 0, 0)) return false;
+        manager.stopProcess("Gazebo simulation world");
+        for (const auto & robot : robots) {
+          if (!wait_for_process("Simulation · " + robot, "Stopped")) return false;
+        }
+        return wait_for_process("Gazebo simulation world", "Stopped") && manager.simulationDomain() == -1 &&
+          manager.log().contains("domain=83 partition=mur_command_center_");
       }
     }
   }
@@ -1535,15 +1653,46 @@ public:
     lift_adapter_(std::make_shared<RosLiftAdapter>()),
     lift_controller_(new LiftController(lift_adapter_, this))
   {
-    setWindowTitle(QString("MuR Command Center · %1").arg(context_));
     const auto window_budget = (desktop_size - QSize(32, 48)).expandedTo(QSize(1, 1));
     setMinimumSize(QSize(840, 460).boundedTo(window_budget));
     resize(QSize(1440, 900).boundedTo(window_budget));
 
+    QString translation_directory;
+    try {
+      translation_directory = QString::fromStdString(
+        ament_index_cpp::get_package_share_directory("match_mur_gui")) + "/command_center/translations";
+    } catch (const ament_index_cpp::PackageNotFoundError &) {
+      translation_directory = QFileInfo(qml_path).absoluteDir().absoluteFilePath("../translations");
+    }
+    const auto font_path = QFileInfo(qml_path).absoluteDir().absoluteFilePath("../../assets/fonts/DMSans.ttf");
+    const auto font_id = QFontDatabase::addApplicationFont(font_path);
+    const auto families = QFontDatabase::applicationFontFamilies(font_id);
+    if (!families.isEmpty()) {
+      auto font = qApp->font();
+      font.setFamily(families.first());
+      font.setPixelSize(14);
+      qApp->setFont(font);
+    }
+    auto * preferences = new UiPreferences(translation_directory, this);
     auto * command_center = new QQuickWidget(this);
+    command_center->installEventFilter(this);
     command_center->setResizeMode(QQuickWidget::SizeRootObjectToView);
-    command_center->rootContext()->setContextProperty("theme", app_theme::colors());
-    command_center->setClearColor(app_theme::colors().value("canvas").value<QColor>());
+    command_center->rootContext()->setContextProperty("appearance", preferences);
+    auto * palette = new QQmlPropertyMap(command_center);
+    const auto apply_qml_palette = [command_center, palette]() {
+      const auto & colors = app_theme::colors();
+      for (auto entry = colors.cbegin(); entry != colors.cend(); ++entry) {
+        palette->insert(entry.key(), entry.value());
+      }
+      command_center->setClearColor(colors.value("canvas").value<QColor>());
+    };
+    apply_qml_palette();
+    command_center->rootContext()->setContextProperty("theme", palette);
+    connect(preferences, &UiPreferences::themeChanged, command_center, apply_qml_palette);
+    connect(preferences, &UiPreferences::languageChanged, this, [this, command_center]() {
+      command_center->engine()->retranslate();
+      update_session_chrome();
+    });
     command_center->rootContext()->setContextProperty("session", session_);
     command_center->rootContext()->setContextProperty("simBaseJog", sim_base_jog_);
     command_center->rootContext()->setContextProperty("goalsPoses", goals_poses_);
@@ -1662,29 +1811,41 @@ public:
         (session_->mode() == "Hardware" || session_->mode() == "Simulation"));
       mir_hardware_control_->setContext(session_->robot(), session_->mode(), session_->preset() + "|" + session_->target(),
         session_->connectionState() == "Connected", session_->mirCommandTopic(), session_->mirCommandType());
-      setWindowTitle(QString("MuR Command Center · %1 · %2 · %3")
-        .arg(session_->mode(), session_->preset(), session_->robot()));
-      if (rviz_dock_) rviz_dock_->setWindowTitle("Visualisierung · " + session_label());
-      if (logs_dock_) logs_dock_->setWindowTitle("Logs · " + session_label());
-      if (log_panel_) log_panel_->setSessionLabel(session_label());
-      statusBar()->showMessage(QString("%1 · %2 · %3 · %4")
-        .arg(session_->target(), session_->robot(), session_->mode(), session_->connectionState()));
+      update_session_chrome();
     });
 
-    logs_dock_ = new QDockWidget("Logs · " + session_label(), this);
+    logs_dock_ = new QDockWidget(this);
     logs_dock_->setObjectName("logsDock");
     logs_dock_->setWidget(dock_viewport(log_panel_));
     logs_dock_->setAllowedAreas(Qt::AllDockWidgetAreas);
     logs_dock_->setFeatures(QDockWidget::DockWidgetClosable |
       QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     log_panel_->setDock(logs_dock_);
-    log_panel_->setSessionLabel(session_label());
     addDockWidget(Qt::BottomDockWidgetArea, logs_dock_);
     resizeDocks({logs_dock_}, {qMin(220, height() / 3)}, Qt::Vertical);
     if (height() < 620) logs_dock_->hide();
 
-    statusBar()->showMessage(QString("%1 · %2 · Disconnected · No processes started")
-      .arg(session_->target(), session_->robot()));
+    update_session_chrome();
+    if (!context_.isEmpty()) setWindowTitle(QString("MuR Command Center · %1").arg(context_));
+  }
+
+  void update_session_chrome()
+  {
+    const auto mode = session_->mode() == "Simulation" ?
+      QCoreApplication::translate("CommandCenter", "Simulation") :
+      QCoreApplication::translate("CommandCenter", "Hardware");
+    setWindowTitle(QString("MuR Command Center · %1 · %2 · %3")
+      .arg(mode, session_->preset(), session_->robot()));
+    const auto label = session_label();
+    if (rviz_dock_) rviz_dock_->setWindowTitle(QCoreApplication::translate("CommandCenter", "Visualization") + " · " + label);
+    if (logs_dock_) logs_dock_->setWindowTitle(QCoreApplication::translate("CommandCenter", "Logs") + " · " + label);
+    if (log_panel_) log_panel_->setSessionLabel(label);
+    const auto state = session_->connectionState();
+    const auto status = state.startsWith("Failed:") ?
+      QCoreApplication::translate("CommandCenter", "Failed") :
+      QCoreApplication::translate("CommandCenter", state.toUtf8().constData());
+    statusBar()->showMessage(QString("%1 · %2 · %3 · %4")
+      .arg(session_->target(), session_->robot(), mode, status));
   }
 
   void spin_ros()
@@ -1723,8 +1884,9 @@ public:
 
   QString session_label() const
   {
-    return QString("%1 · %2 · %3 · %4 · domain %5")
-      .arg(session_->mode(), session_->preset(), session_->target(), session_->robot())
+    return QCoreApplication::translate("CommandCenter", "%1 · %2 · %3 · %4 · domain %5")
+      .arg(QCoreApplication::translate("CommandCenter", session_->mode().toUtf8().constData()),
+        session_->preset(), session_->target(), session_->robot())
       .arg(session_->rosDomain());
   }
 
@@ -1746,7 +1908,7 @@ public:
       pending_context_.clear();
       session_->setDiscoveryRoute(QString());
       session_->setDiagnostics({"Session context changed before RViz connected; connect again to use the selected profile"});
-      session_->setConnectionState("Disconnected");
+      session_->setConnectionState(QT_TRANSLATE_NOOP("CommandCenter", "Disconnected"));
       return false;
     }
     if (rviz_node_ && !connected_context_.isEmpty() && connected_context_ != session_context()) {
@@ -1777,7 +1939,7 @@ public:
       session_->setConnectionState("Failed: invalid target host");
       return;
     }
-    session_->setConnectionState("Connecting");
+    session_->setConnectionState(QT_TRANSLATE_NOOP("CommandCenter", "Connecting"));
     pending_context_ = session_context();
     auto resolved = [this, host, domain](const QHostInfo & info) {
         if (session_->connectionState() != "Connecting") return;
@@ -1842,7 +2004,7 @@ public:
       frame->setSplashPath("");
       frame->setHideButtonVisibility(false);
       frame->initialize(rviz_node_);
-      rviz_dock_ = new QDockWidget("Visualisierung · " + session_label(), this);
+      rviz_dock_ = new QDockWidget(this);
       rviz_dock_->setObjectName("rvizVisualizationDock");
       rviz_dock_->setWidget(dock_viewport(frame));
       rviz_dock_->setAllowedAreas(Qt::AllDockWidgetAreas);
@@ -1853,12 +2015,21 @@ public:
         if (visible) frame->setFocus(Qt::OtherFocusReason);
       });
       frame->loadDisplayConfig(session_->rvizConfigPath(config_override_));
+      if (session_->usesDefaultSimulationRviz(config_override_)) {
+        auto * manager = frame->getManager();
+        manager->setFixedFrame(session_->robot() + "/odom");
+        if (auto * model = manager->createDisplay("rviz_default_plugins/RobotModel", "Robot model", true)) {
+          if (auto * topic = model->subProp("Description Topic")) {
+            topic->setValue("/" + session_->robot() + "/robot_description");
+          }
+        }
+      }
       resizeDocks({rviz_dock_}, {width() / 3}, Qt::Horizontal);
       ros_spin_timer_.start(10);
       diagnosis_timer_.start(500);
       connected_context_ = pending_context_.isEmpty() ? session_context() : pending_context_;
       pending_context_.clear();
-      session_->setConnectionState("Connected");
+      session_->setConnectionState(QT_TRANSLATE_NOOP("CommandCenter", "Connected"));
       session_->setDiagnostics(session_diagnostics());
     } catch (const std::exception & error) {
       session_monitor_.reset();
@@ -1930,11 +2101,23 @@ public:
     connected_context_.clear();
     if (rclcpp::ok()) rclcpp::shutdown();
     session_->setDiscoveryRoute(QString());
-    session_->setDiagnostics({"Disconnected · external ROS launches and processes were left running"});
+    session_->setDiagnostics({QT_TRANSLATE_NOOP("CommandCenter", "Disconnected · external ROS launches and processes were left running")});
     session_->setConnectionState("Disconnected");
   }
 
 protected:
+  bool eventFilter(QObject * watched, QEvent * event) override
+  {
+    if (watched == centralWidget() && event->type() == QEvent::MouseButtonRelease) {
+      auto * view = qobject_cast<QQuickWidget *>(watched);
+      QTimer::singleShot(0, view, [view]() {
+        view->quickWindow()->requestUpdate();
+        view->update();
+      });
+    }
+    return QMainWindow::eventFilter(watched, event);
+  }
+
   void closeEvent(QCloseEvent * event) override
   {
     if (shutdown_ && shutdown_->busy()) { event->ignore(); return; }
@@ -1998,6 +2181,13 @@ bool run_connection_error_layout_contract_test(const QString & qml_path, const Q
 {
   QTemporaryDir directory;
   if (!directory.isValid()) return false;
+  const auto settings_path = directory.filePath("command-center.ini");
+  const auto original_settings = qgetenv("MUR_COMMAND_CENTER_SETTINGS");
+  qputenv("MUR_COMMAND_CENTER_SETTINGS", settings_path.toUtf8());
+  const auto restore_settings = qScopeGuard([&]() {
+    if (original_settings.isNull()) qunsetenv("MUR_COMMAND_CENTER_SETTINGS");
+    else qputenv("MUR_COMMAND_CENTER_SETTINGS", original_settings);
+  });
   const auto missing_config = directory.filePath(QString(190, 'x') + ".rviz");
   SessionController fixture;
   if (!fixture.saveProfile("Local simulation", "Simulation", "localhost", "mur620d", "RViz",
@@ -2065,6 +2255,34 @@ bool run_connection_error_layout_contract_test(const QString & qml_path, const Q
   };
   QCoreApplication::processEvents();
   if (!header_fits()) return false;
+  for (const auto * name : {"modeSelector", "presetSelector", "targetSelector", "robotSelector"}) {
+    auto * selector = view->rootObject()->findChild<QQuickItem *>(name);
+    auto * popup = selector ? selector->property("popup").value<QObject *>() : nullptr;
+    if (!popup) return false;
+    const auto arrow_scene = selector->mapToScene(QPointF(selector->width() - 10, selector->height() / 2));
+    const auto arrow_global = view->quickWindow()->mapToGlobal(arrow_scene.toPoint());
+    const auto arrow = view->mapFromGlobal(arrow_global);
+    QMouseEvent press(QEvent::MouseButtonPress, QPointF(arrow), QPointF(arrow_global),
+      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(view, &press);
+    QMouseEvent release(QEvent::MouseButtonRelease, QPointF(arrow), QPointF(arrow_global),
+      Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(view, &release);
+    QEventLoop popup_loop;
+    QTimer::singleShot(100, &popup_loop, &QEventLoop::quit);
+    popup_loop.exec();
+    auto * list = qobject_cast<QQuickItem *>(popup->property("contentItem").value<QObject *>());
+    auto * first_choice = list ? find_item(find_item, list, [](auto * item) {
+      return item->isVisible() && item->metaObject()->indexOfProperty("text") >= 0;
+    }) : nullptr;
+    if (!popup->property("visible").toBool() || popup->property("height").toReal() < 40 ||
+      !list || list->property("count").toInt() < 1 || !first_choice || !first_choice->isVisible()) {
+      qCritical("Dropdown '%s' did not open on the first click", name);
+      return false;
+    }
+    QMetaObject::invokeMethod(popup, "close");
+    QCoreApplication::processEvents();
+  }
   auto * logs_dock = window.findChild<QDockWidget *>("logsDock");
   if (!logs_dock || (desktop_size.height() <= 540 && logs_dock->isVisible())) {
     qCritical("Unexpected startup log dock visibility");
@@ -2072,8 +2290,37 @@ bool run_connection_error_layout_contract_test(const QString & qml_path, const Q
   }
   auto * log_output = logs_dock->findChild<QPlainTextEdit *>();
   const auto & colors = app_theme::colors();
-  if (!log_output || log_output->palette().color(QPalette::Base) != colors.value("canvas").value<QColor>()) {
+  if (!log_output || log_output->palette().color(QPalette::Base) != colors.value("raised").value<QColor>()) {
     qCritical("The log dock does not use the Command Center canvas color");
+    return false;
+  }
+  auto * title = view->rootObject()->findChild<QQuickItem *>("titleBar");
+  auto * language_de = view->rootObject()->findChild<QQuickItem *>("languageDE");
+  auto * language_en = view->rootObject()->findChild<QQuickItem *>("languageEN");
+  auto * theme_light = view->rootObject()->findChild<QQuickItem *>("themeLight");
+  auto * theme_dark = view->rootObject()->findChild<QQuickItem *>("themeDark");
+  auto * compare_logs = logs_dock->findChild<QCheckBox *>("compareLogs");
+  const auto choose = [](QQuickItem * button) {
+    if (!button || !QMetaObject::invokeMethod(button, "clicked")) return false;
+    QCoreApplication::processEvents();
+    return button->property("checked").toBool();
+  };
+  if (!title || !compare_logs || !fits(language_de) || !fits(language_en) ||
+    !fits(theme_light) || !fits(theme_dark) ||
+    find_button("Connect")->mapToItem(view->rootObject(), QPointF()).y() < title->height() ||
+    !choose(theme_light) || !choose(language_de) ||
+    !fits(find_button("Verbinden")) || !fits(find_button("Prozesse")) ||
+    compare_logs->text() != "Protokolle vergleichen" ||
+    title->property("color").value<QColor>() != QColor("#ffffff") ||
+    log_output->palette().color(QPalette::Base) != QColor("#f0f0f0")) {
+    qCritical("Appearance buttons did not update the title controls, navigation and log dock");
+    return false;
+  }
+  QSettings saved(settings_path, QSettings::IniFormat);
+  if (saved.value("appearance/theme").toString() != "light" ||
+    saved.value("appearance/language").toString() != "de" || session->view() != "Overview" ||
+    !choose(language_en) || !choose(theme_dark) || !header_fits()) {
+    qCritical("Appearance selection was not persisted or did not restore the default appearance");
     return false;
   }
   const auto preview_directory = qEnvironmentVariable("MUR_COMMAND_CENTER_SCREENSHOTS");
@@ -2110,6 +2357,70 @@ bool run_connection_error_layout_contract_test(const QString & qml_path, const Q
       return false;
     }
   }
+  session->selectView("Processes");
+  QCoreApplication::processEvents();
+  auto * flows_button = view->rootObject()->findChild<QQuickItem *>("openSimulationFlows");
+  auto * add_world = view->rootObject()->findChild<QQuickItem *>("addFlowWorld");
+  auto * add_robot = view->rootObject()->findChild<QQuickItem *>("addFlowRobot");
+  auto * flow_name = view->rootObject()->findChild<QQuickItem *>("flowName");
+  auto * save_flow = view->rootObject()->findChild<QQuickItem *>("saveFlow");
+  auto * flows_dialog = view->rootObject()->findChild<QObject *>("simulationFlowsDialog");
+  if (!flows_button || !add_world || !add_robot || !flows_dialog ||
+    !QMetaObject::invokeMethod(flows_button, "clicked")) return false;
+  QCoreApplication::processEvents();
+  if (!add_world->isEnabled() || !QMetaObject::invokeMethod(add_world, "clicked") ||
+    !add_robot->isEnabled() || !QMetaObject::invokeMethod(add_robot, "clicked")) return false;
+  QEventLoop layout_loop;
+  QTimer::singleShot(150, &layout_loop, &QEventLoop::quit);
+  layout_loop.exec();
+  for (const auto & name : {"flowWorldSelector", "flowRobotSelector", "flowModelSelector"}) {
+    auto * selector = find_item(find_item, view->quickWindow()->contentItem(), [name](auto * item) {
+      return item->isVisible() && item->objectName() == name;
+    });
+    auto * content = selector ? find_item(find_item, selector, [](auto * item) {
+      return item->objectName() == "flowComboText";
+    }) : nullptr;
+    if (!selector || !content || content->property("color").value<QColor>() != colors.value("ink").value<QColor>()) {
+      qCritical("Flow dropdown '%s' does not use the readable theme text color", name);
+      return false;
+    }
+    auto * popup = selector->property("popup").value<QObject *>();
+    if (!popup || !QMetaObject::invokeMethod(popup, "open")) return false;
+    QCoreApplication::processEvents();
+    if (!popup->property("visible").toBool()) return false;
+    if (selector->property("count").toInt() > 1) {
+      if (!selector->setProperty("currentIndex", 1) ||
+        !QMetaObject::invokeMethod(selector, "activated", Q_ARG(int, 1))) return false;
+      QCoreApplication::processEvents();
+    }
+    if (!preview_directory.isEmpty() && QString::fromLatin1(name) == "flowWorldSelector") {
+      const auto filename = QDir(preview_directory).filePath(
+        desktop_size.height() <= 540 ? "flows-compact.png" : "flows-desktop.png");
+      if (!window.grab().save(filename)) return false;
+    }
+    QMetaObject::invokeMethod(popup, "close");
+  }
+  if (!flow_name || !save_flow || !flow_name->setProperty("text", "Test flow") ||
+    !QMetaObject::invokeMethod(save_flow, "clicked") || session->simulationFlows().size() != 1 ||
+    session->simulationFlows().first().toMap().value("blocks").toList().size() != 2) return false;
+  const auto flow_blocks = session->simulationFlows().first().toMap().value("blocks").toList();
+  if (flow_blocks.at(1).toMap().value("robot").toString() != "mur620b" ||
+    flow_blocks.at(1).toMap().value("model").toString() != "mur620") return false;
+  SessionController restored_flow;
+  if (restored_flow.simulationFlows().size() != 1 ||
+    restored_flow.simulationFlows().first().toMap().value("name").toString() != "Test flow") return false;
+  if (!QMetaObject::invokeMethod(flows_dialog, "close")) return false;
+  auto * gazebo_switch = view->rootObject()->findChild<QQuickItem *>("gazeboViewSwitch");
+  if (!gazebo_switch || !gazebo_switch->isEnabled() ||
+    gazebo_switch->property("text").toString() != "Gazebo window on start" ||
+    gazebo_switch->property("checked").toBool() ||
+    !gazebo_switch->setProperty("checked", true) ||
+    !QMetaObject::invokeMethod(gazebo_switch, "toggled") ||
+    !session->gazeboViewOnSimulationStart()) {
+    qCritical("The Gazebo switch did not set the startup preference before the simulation was running");
+    return false;
+  }
+  session->setGazeboViewOnSimulationStart(false);
   session->selectView("Logs");
   auto * open_logs = reach_button("Open log dock");
   if (!open_logs || !QMetaObject::invokeMethod(open_logs, "clicked")) {
@@ -2200,13 +2511,13 @@ int main(int argc, char ** argv)
 {
   qputenv("QT_QUICK_CONTROLS_STYLE", "Fusion");
   QApplication app(argc, argv);
+  app.setStyle("Fusion");
   app_theme::apply(app);
   app.setApplicationName("MuR Command Center");
 
   QString config_path;
   QString qml_path;
-  QString context = "Simulation · local · domain " +
-    qEnvironmentVariable("ROS_DOMAIN_ID", "unset");
+  QString context;
   const auto arguments = app.arguments();
   for (int i = 1; i < arguments.size(); ++i) {
     if (arguments[i] == "--config" && i + 1 < arguments.size()) {

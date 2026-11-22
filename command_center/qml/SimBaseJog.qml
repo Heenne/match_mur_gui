@@ -90,10 +90,10 @@ Item {
             anchors.fill: parent
             anchors.margins: 18
             spacing: 12
-            Label { text: "Simulation base jog"; color: panel.foreground; font.pixelSize: 20; font.bold: true }
+            Label { text: qsTr("Simulation base jog"); color: panel.foreground; font.pixelSize: 20; font.bold: true }
             Label {
                 Layout.fillWidth: true
-                text: "Configured endpoint: " + (session.simCommandTopic || "not configured") + " · TwistStamped · max 0.15 m/s, 0.4 rad/s"
+                text: qsTr("Endpoint %1 · TwistStamped · max. 0.15 m/s, 0.4 rad/s").arg(session.simCommandTopic || qsTr("not configured"))
                 color: panel.muted
                 wrapMode: Text.WordWrap
             }
@@ -101,7 +101,7 @@ Item {
                 Layout.fillWidth: true
                 Switch {
                     id: enableSwitch
-                    text: checked ? "Jog enabled" : "Explicitly enable jog"
+                    text: checked ? qsTr("Jog enabled") : qsTr("Explicitly enable jog")
                     checked: simBaseJog.enabled
                     enabled: session.mode === "Simulation" && session.connectionState === "Connected"
                     onToggled: simBaseJog.setEnabled(checked)
@@ -111,7 +111,7 @@ Item {
             }
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "Linear · " + simBaseJog.linearSpeed.toFixed(2) + " m/s"; color: panel.muted }
+                Label { text: qsTr("Linear · %1 m/s").arg(simBaseJog.linearSpeed.toFixed(2)); color: panel.muted }
                 Slider {
                     Layout.fillWidth: true
                     from: 0.01
@@ -122,7 +122,7 @@ Item {
             }
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "Turn · " + simBaseJog.angularSpeed.toFixed(2) + " rad/s"; color: panel.muted }
+                Label { text: qsTr("Turn · %1 rad/s").arg(simBaseJog.angularSpeed.toFixed(2)); color: panel.muted }
                 Slider {
                     Layout.fillWidth: true
                     from: 0.05
@@ -132,7 +132,7 @@ Item {
                 }
             }
             Label {
-                text: "Keyboard: arrow keys hold direction · Space or Escape stops"
+                text: qsTr("Keyboard: arrow keys hold direction · Space or Escape stops")
                 color: panel.muted
             }
             GridLayout {
@@ -141,16 +141,16 @@ Item {
                 rowSpacing: 8
                 columnSpacing: 8
                 Item { width: 108; height: 56 }
-                HoldButton { text: "Forward"; direction: "forward" }
+                HoldButton { text: qsTr("Forward"); direction: "forward" }
                 Item { width: 108; height: 56 }
-                HoldButton { text: "Turn left"; direction: "left" }
-                HoldButton { text: "Backward"; direction: "backward" }
-                HoldButton { text: "Turn right"; direction: "right" }
+                HoldButton { text: qsTr("Turn left"); direction: "left" }
+                HoldButton { text: qsTr("Backward"); direction: "backward" }
+                HoldButton { text: qsTr("Turn right"); direction: "right" }
             }
             Label {
                 Layout.fillWidth: true
                 text: simBaseJog.status
-                color: simBaseJog.holding ? theme.accent : panel.muted
+                color: simBaseJog.holding ? theme.focus : panel.muted
                 Accessible.name: simBaseJog.status
             }
         }

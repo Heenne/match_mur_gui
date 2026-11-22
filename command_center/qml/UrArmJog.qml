@@ -24,21 +24,21 @@ FocusScope {
 
         RowLayout {
             Layout.fillWidth: true
-            Label { text: "UR arm control"; color: theme.ink; font.pixelSize: 20; font.bold: true }
+            Label { text: qsTr("UR arm control"); color: theme.ink; font.pixelSize: 20; font.bold: true }
             Item { Layout.fillWidth: true }
             ComboBox {
                 id: sideChoice
                 model: ["UR10_r", "UR10_l"]
                 currentIndex: controller && controller.selectedArm === "UR10_l" ? 1 : 0
                 onActivated: if (controller) controller.selectArm(currentIndex === 1 ? "l" : "r")
-                Accessible.name: "Selected UR arm"
+                Accessible.name: qsTr("Selected UR arm")
             }
         }
 
         Label {
             Layout.fillWidth: true
-            text: controller ? controller.readiness : "No UR arm controller"
-            color: controller && controller.ready ? theme.accent : theme.warning
+            text: controller ? controller.readiness : qsTr("No UR arm controller")
+            color: controller && controller.ready ? theme.focus : theme.warning
             font.family: "monospace"
             font.pixelSize: 13
             wrapMode: Text.WordWrap
@@ -49,7 +49,7 @@ FocusScope {
             spacing: 18
             ColumnLayout {
                 Layout.fillWidth: true
-                Label { text: "Translation ≤ 0.05 m/s"; color: theme.muted }
+                Label { text: qsTr("Translation ≤ 0.05 m/s"); color: theme.muted }
                 Slider {
                     id: linear
                     Layout.fillWidth: true
@@ -59,7 +59,7 @@ FocusScope {
             }
             ColumnLayout {
                 Layout.fillWidth: true
-                Label { text: "Rotation ≤ 0.20 rad/s"; color: theme.muted }
+                Label { text: qsTr("Rotation ≤ 0.20 rad/s"); color: theme.muted }
                 Slider {
                     id: angular
                     Layout.fillWidth: true
@@ -72,10 +72,10 @@ FocusScope {
         RowLayout {
             Layout.fillWidth: true
             Button {
-                text: controller && controller.armed ? "Disarm" : "Arm selected UR arm"
+                text: controller && controller.armed ? qsTr("Disarm") : qsTr("Arm selected UR arm")
                 enabled: controller && (controller.ready || controller.armed)
                 onClicked: if (controller) controller.setArmed(!controller.armed)
-                Accessible.name: "Explicitly arm selected UR arm jog"
+                Accessible.name: qsTr("Explicitly arm selected UR arm jog")
             }
             Label { Layout.fillWidth: true; text: controller ? controller.status : ""; color: theme.muted; wrapMode: Text.WordWrap }
         }
@@ -88,7 +88,7 @@ FocusScope {
             border.color: theme.danger
             Button {
                 anchors.fill: parent
-                text: controller ? "STOP · " + controller.selectedArm : "STOP ARM JOG"
+                text: controller ? "STOP · " + controller.selectedArm : qsTr("STOP ARM JOG")
                 enabled: controller && (controller.holding || controller.armed)
                 onClicked: if (controller) controller.stop("operator stop")
                 background: Rectangle { color: "transparent" }
@@ -100,7 +100,7 @@ FocusScope {
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
-                Accessible.name: "Stop selected UR arm jog immediately"
+                Accessible.name: qsTr("Stop selected UR arm jog immediately")
             }
         }
 
@@ -114,9 +114,9 @@ FocusScope {
                     {label: "X−", axis: "tx-"}, {label: "X+", axis: "tx+"},
                     {label: "Y−", axis: "ty-"}, {label: "Y+", axis: "ty+"},
                     {label: "Z−", axis: "tz-"}, {label: "Z+", axis: "tz+"},
-                    {label: "Rx−", axis: "rx-"}, {label: "Rx+", axis: "rx+"},
-                    {label: "Ry−", axis: "ry-"}, {label: "Ry+", axis: "ry+"},
-                    {label: "Rz−", axis: "rz-"}, {label: "Rz+", axis: "rz+"}
+                    {label: qsTr("Rx−"), axis: "rx-"}, {label: qsTr("Rx+"), axis: "rx+"},
+                    {label: qsTr("Ry−"), axis: "ry-"}, {label: qsTr("Ry+"), axis: "ry+"},
+                    {label: qsTr("Rz−"), axis: "rz-"}, {label: qsTr("Rz+"), axis: "rz+"}
                 ]
                 Button {
                     required property var modelData
@@ -127,14 +127,14 @@ FocusScope {
                     onPressed: if (controller) controller.press(modelData.axis)
                     onReleased: if (controller) controller.release()
                     onCanceled: if (controller) controller.stop("button cancelled")
-                    Accessible.name: "Hold to jog " + modelData.label
+                    Accessible.name: qsTr("Hold to jog %1").arg(modelData.label)
                 }
             }
         }
 
         Label {
             Layout.fillWidth: true
-            text: "Hold a direction to move. Releasing, losing focus, changing arms, or disconnecting stops the command. Only this arm is addressed."
+            text: qsTr("Hold a direction to move. Releasing, losing focus, changing arms, or disconnecting stops the command. Only this arm is addressed.")
             color: theme.muted
             wrapMode: Text.WordWrap
         }

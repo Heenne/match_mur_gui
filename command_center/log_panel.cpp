@@ -5,6 +5,7 @@
 #include <QCheckBox>
 #include <QCoreApplication>
 #include <QDockWidget>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -39,7 +40,7 @@ private:
     if (!match.hasMatch()) return;
     const auto & theme = app_theme::colors();
     const auto level = match.captured(2);
-    const auto tone = level == "INFO" ? "accent" : level == "WARN" ? "warning" :
+    const auto tone = level == "INFO" ? "focus" : level == "WARN" ? "warning" :
       level == "DEBUG" ? "muted" : "danger";
     setFormat(match.capturedStart(1), match.capturedLength(1), theme.value("subtle").value<QColor>());
     setFormat(match.capturedStart(2), match.capturedLength(2), theme.value(tone).value<QColor>());
@@ -49,6 +50,8 @@ private:
 
 class LogSourceView : public QWidget
 {
+  Q_DECLARE_TR_FUNCTIONS(LogSourceView)
+
 public:
   LogSourceView(LogStore * store, const QString & source, QWidget * parent = nullptr)
   : QWidget(parent), store_(store), source_(source)
@@ -56,15 +59,13 @@ public:
     auto * layout = new QVBoxLayout(this);
     auto * filters = new QHBoxLayout;
     search_ = new QLineEdit(this);
-    search_->setPlaceholderText("Search this log");
     filters->addWidget(search_, 1);
-    auto * severity = new QToolButton(this);
-    severity->setText("Severity");
-    severity->setPopupMode(QToolButton::InstantPopup);
-    auto * severity_menu = new QMenu(severity);
-    severity->setMenu(severity_menu);
-    filters->addWidget(severity);
-    follow_ = new QCheckBox("Follow latest", this);
+    severity_ = new QToolButton(this);
+    severity_->setPopupMode(QToolButton::InstantPopup);
+    auto * severity_menu = new QMenu(severity_);
+    severity_->setMenu(severity_menu);
+    filters->addWidget(severity_);
+    follow_ = new QCheckBox(this);
     follow_->setObjectName("followLatest");
     follow_->setChecked(true);
     filters->addWidget(follow_);
@@ -73,9 +74,8 @@ public:
       check->setCheckable(true);
       check->setChecked(true);
       levels_.insert(level, check);
-      QObject::connect(check, &QAction::toggled, this, [this, severity]() {
-        const auto count = selectedLevels().size();
-        severity->setText(count == levels_.size() ? "Severity" : QString("Severity (%1)").arg(count));
+      QObject::connect(check, &QAction::toggled, this, [this]() {
+        updateSeverityText();
         reloadFilteredOutput();
       });
     }
@@ -85,7 +85,8 @@ public:
     output_->setReadOnly(true);
     output_->setLineWrapMode(QPlainTextEdit::NoWrap);
     output_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    new LogHighlighter(output_->document());
+    highlighter_ = new LogHighlighter(output_->document());
+    retranslate();
     layout->addWidget(output_, 1);
     auto * vertical = output_->verticalScrollBar();
     QObject::connect(follow_, &QCheckBox::toggled, this, [vertical](bool follow) {
@@ -130,7 +131,28 @@ public:
     horizontal->setValue(old_column);
   }
 
+protected:
+  void changeEvent(QEvent * event) override
+  {
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::LanguageChange) retranslate();
+    if (event->type() == QEvent::PaletteChange && highlighter_) highlighter_->rehighlight();
+  }
+
 private:
+  void retranslate()
+  {
+    search_->setPlaceholderText(tr("Search this log"));
+    follow_->setText(tr("Follow latest"));
+    updateSeverityText();
+  }
+
+  void updateSeverityText()
+  {
+    const auto count = selectedLevels().size();
+    severity_->setText(count == levels_.size() ? tr("Severity") : tr("Severity (%1)").arg(count));
+  }
+
   void reloadFilteredOutput()
   {
     next_entry_ = 0;
@@ -143,7 +165,9 @@ private:
   int next_entry_{0};
   QLineEdit * search_{};
   QCheckBox * follow_{};
+  QToolButton * severity_{};
   QPlainTextEdit * output_{};
+  LogHighlighter * highlighter_{};
   QMap<QString, QAction *> levels_;
 };
 }
@@ -158,16 +182,15 @@ LogPanel::LogPanel(LogStore * store, QWidget * parent) : QWidget(parent), store_
   session_label_->setReadOnly(true);
   session_label_->setObjectName("sessionLogLocation");
   session_label_->setFrame(false);
-  session_label_->setAccessibleName("Session log location");
   session_label_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
   toolbar->addWidget(session_label_, 1);
-  auto * compare = new QCheckBox("Compare logs", this);
-  compare->setObjectName("compareLogs");
-  toolbar->addWidget(compare);
-  auto * full = new QPushButton("Export full recording…", this);
-  auto * filtered = new QPushButton("Export filtered view…", this);
-  toolbar->addWidget(full);
-  toolbar->addWidget(filtered);
+  compare_ = new QCheckBox(this);
+  compare_->setObjectName("compareLogs");
+  toolbar->addWidget(compare_);
+  export_full_ = new QPushButton(this);
+  export_filtered_ = new QPushButton(this);
+  toolbar->addWidget(export_full_);
+  toolbar->addWidget(export_filtered_);
   root->addLayout(toolbar);
 
   auto * split = new QHBoxLayout;
@@ -183,15 +206,34 @@ LogPanel::LogPanel(LogStore * store, QWidget * parent) : QWidget(parent), store_
   }
   panes_[1]->hide();
   root->addLayout(split, 1);
-  connect(compare, &QCheckBox::toggled, this, [this, filtered](bool enabled) {
+  connect(compare_, &QCheckBox::toggled, this, [this](bool enabled) {
     panes_[1]->setVisible(enabled);
-    filtered->setText(enabled ? "Export left filtered view…" : "Export filtered view…");
+    retranslate();
     if (enabled) refreshSources();
   });
   connect(store_, &LogStore::changed, this, &LogPanel::refreshSources);
-  connect(full, &QPushButton::clicked, this, &LogPanel::exportFull);
-  connect(filtered, &QPushButton::clicked, this, &LogPanel::exportFiltered);
+  connect(export_full_, &QPushButton::clicked, this, &LogPanel::exportFull);
+  connect(export_filtered_, &QPushButton::clicked, this, &LogPanel::exportFiltered);
   refreshSources();
+  retranslate();
+}
+
+void LogPanel::changeEvent(QEvent * event)
+{
+  QWidget::changeEvent(event);
+  if (event->type() == QEvent::LanguageChange) retranslate();
+}
+
+void LogPanel::retranslate()
+{
+  session_label_->setAccessibleName(tr("Session log location"));
+  compare_->setText(tr("Compare logs"));
+  export_full_->setText(tr("Export full recording…"));
+  export_filtered_->setText(compare_->isChecked() ?
+    tr("Export left filtered view…") : tr("Export filtered view…"));
+  for (auto * pane : panes_) {
+    if (pane->count() > 0) pane->setTabText(0, tr("All logs"));
+  }
 }
 
 QString LogPanel::selectedSource() const
@@ -204,7 +246,8 @@ void LogPanel::showSource(const QString & source)
 {
   refreshSources();
   for (int i = 0; i < panes_[0]->count(); ++i) {
-    if (panes_[0]->tabText(i) == source) {
+    const auto * view = static_cast<const LogSourceView *>(panes_[0]->widget(i));
+    if (view->source() == source) {
       panes_[0]->setCurrentIndex(i);
       selected_source_ = source;
       return;
@@ -235,7 +278,7 @@ void LogPanel::setSessionLabel(const QString & label)
 {
   session_label_->setText(store_->filePath());
   session_label_->setCursorPosition(0);
-  session_label_->setToolTip("Session log · " + label + '\n' + store_->filePath());
+  session_label_->setToolTip(tr("Session log · %1").arg(label) + '\n' + store_->filePath());
 }
 
 void LogPanel::refreshSources()
@@ -248,17 +291,21 @@ void LogPanel::refreshSources()
     }
     for (const auto & source : sources) {
       bool found = false;
-      for (int i = 0; i < panes_[pane]->count(); ++i) found |= panes_[pane]->tabText(i) == source;
+      for (int i = 0; i < panes_[pane]->count(); ++i) {
+        const auto * view = static_cast<const LogSourceView *>(panes_[pane]->widget(i));
+        found |= view->source() == source;
+      }
       if (found) continue;
       auto * view = new LogSourceView(store_, source, panes_[pane]);
-      panes_[pane]->addTab(view, source);
+      panes_[pane]->addTab(view, source == "All logs" ? tr("All logs") : source);
     }
   }
 }
 
 void LogPanel::exportFull()
 {
-  const auto path = QFileDialog::getSaveFileName(this, "Export full log recording", "session.log", "Log files (*.log *.txt);;All files (*)");
+  const auto path = QFileDialog::getSaveFileName(this, tr("Export full log recording"),
+    "session.log", tr("Log files (*.log *.txt);;All files (*)"));
   if (path.isEmpty()) return;
   QSaveFile file(path);
   if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -271,7 +318,8 @@ void LogPanel::exportFiltered()
 {
   auto * view = dynamic_cast<LogSourceView *>(panes_[0]->currentWidget());
   if (!view) return;
-  const auto path = QFileDialog::getSaveFileName(this, "Export filtered log view", "session-filtered.log", "Log files (*.log *.txt);;All files (*)");
+  const auto path = QFileDialog::getSaveFileName(this, tr("Export filtered log view"),
+    "session-filtered.log", tr("Log files (*.log *.txt);;All files (*)"));
   if (path.isEmpty()) return;
   QSaveFile file(path);
   if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {

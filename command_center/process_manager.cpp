@@ -2,17 +2,63 @@
 #include "log_store.hpp"
 
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QTimer>
 #include <QRegularExpression>
 #include <QUuid>
+#include <QUrl>
+#include <QXmlStreamReader>
+
+#include "ament_index_cpp/get_package_share_directory.hpp"
 
 #include <csignal>
+#include <cerrno>
+#include <cmath>
 #include <sys/types.h>
 #include <unistd.h>
 
 namespace
 {
+const QString world_process = QT_TRANSLATE_NOOP("CommandCenter", "Gazebo simulation world");
+const QString robot_run_prefix = "Simulation · ";
+
+void interrupt_local_process(pid_t pid)
+{
+  if (pid > 1 && ::kill(-pid, SIGINT) < 0 && errno == ESRCH) {
+    // An owned process can still be entering its new session in setsid.
+    ::kill(pid, SIGINT);
+  }
+}
+
+QString absolute_local_file(const QString & value)
+{
+  const QUrl url(value);
+  const QFileInfo file(url.isLocalFile() ? url.toLocalFile() : value);
+  return file.isFile() && file.isReadable() ? file.absoluteFilePath() : QString();
+}
+
+QString sdf_world_name(const QString & path)
+{
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly)) return {};
+  QXmlStreamReader xml(&file);
+  if (!xml.readNextStartElement() || xml.name() != QStringLiteral("sdf")) return {};
+  QString name;
+  while (xml.readNextStartElement()) {
+    if (xml.name() == QStringLiteral("world")) {
+      if (!name.isEmpty()) return {};
+      name = xml.attributes().value("name").toString();
+      static const QRegularExpression valid_name("^[A-Za-z0-9_-]+$");
+      if (!valid_name.match(name).hasMatch()) return {};
+    }
+    xml.skipCurrentElement();
+  }
+  return xml.hasError() ? QString() : name;
+}
+
 QStringList simulation_arguments(const QString & robot)
 {
   return {"launch", "mur_launch_sim", "mur620.launch.py", "robot_name:=" + robot,
@@ -55,25 +101,37 @@ ProcessManager::ProcessManager(QObject * parent, const QString & ssh_program)
 {
   gazebo_probe_timeout_.setSingleShot(true);
   connect(&gazebo_probe_timeout_, &QTimer::timeout, this, [this]() {
-    setGazeboServerStatus("Failed", "Gazebo Transport discovery timed out");
+    if (probe_partition_ == gazebo_partition_) {
+      setGazeboServerStatus("Failed", "Gazebo Transport discovery timed out");
+    }
     gazebo_probe_.kill();
   });
   connect(&gazebo_probe_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
     if (error != QProcess::FailedToStart) return;
     gazebo_probe_timeout_.stop();
-    setGazeboServerStatus("Failed", gazebo_probe_.errorString());
+    if (probe_partition_ == gazebo_partition_) {
+      setGazeboServerStatus("Failed", gazebo_probe_.errorString());
+    } else {
+      QTimer::singleShot(0, this, &ProcessManager::probeGazeboServer);
+    }
   });
   connect(&gazebo_probe_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
     [this](int code, QProcess::ExitStatus status) {
       gazebo_probe_timeout_.stop();
       const auto services = gazebo_probe_.readAllStandardOutput().split('\n');
       const auto error = QString::fromLocal8Bit(gazebo_probe_.readAllStandardError()).trimmed();
+      if (probe_partition_ != gazebo_partition_) {
+        QTimer::singleShot(0, this, &ProcessManager::probeGazeboServer);
+        return;
+      }
       if (status != QProcess::NormalExit || code != 0) {
         setGazeboServerStatus("Failed", error.isEmpty() ? gazebo_probe_.errorString() : error);
         return;
       }
       for (const auto & service : services) {
-        if (service.trimmed() == "/gazebo/worlds") {
+        const auto expected = simulation_world_name_.isEmpty() ? QString("/gazebo/worlds") :
+          QString("/world/%1/create").arg(simulation_world_name_);
+        if (service.trimmed() == expected.toUtf8()) {
           gazebo_probe_age_.start();
           setGazeboServerStatus("Available");
           return;
@@ -91,7 +149,13 @@ ProcessManager::~ProcessManager()
     gazebo_probe_.waitForFinished(1000);
   }
   stopAll();
+  for (auto * managed : managed_) managed->process->disconnect(this);
   for (auto * managed : managed_) {
+    if (managed->removal_process) {
+      managed->removal_process->disconnect(this);
+      managed->removal_process->kill();
+      managed->removal_process->waitForFinished(1000);
+    }
     if (managed->stop_process) managed->stop_process->waitForFinished(10000);
     if (managed->process->state() != QProcess::NotRunning) {
       const auto pid = static_cast<pid_t>(managed->process->processId());
@@ -99,7 +163,7 @@ ProcessManager::~ProcessManager()
         managed->process->terminate();
         if (!managed->process->waitForFinished(8000)) managed->process->kill();
       } else {
-        if (pid > 1) ::kill(-pid, SIGINT);
+        interrupt_local_process(pid);
         if (!managed->process->waitForFinished(8000)) {
           if (pid > 1) ::kill(-pid, SIGTERM);
           if (!managed->process->waitForFinished(2000) && pid > 1) ::kill(-pid, SIGKILL);
@@ -109,6 +173,73 @@ ProcessManager::~ProcessManager()
     }
     delete managed;
   }
+}
+
+QVariantList ProcessManager::simulationWorlds() const
+{
+  QVariantList worlds;
+  try {
+    const QDir share(QString::fromStdString(ament_index_cpp::get_package_share_directory("mir_gazebo")));
+    const QDir world_dir(share.filePath("worlds"));
+    for (const auto & file : world_dir.entryInfoList({"*.world", "*.sdf"}, QDir::Files | QDir::Readable)) {
+      const auto label = file.completeBaseName();
+      const QFileInfo map(share.filePath("maps/" + label + ".yaml"));
+      worlds.append(QVariantMap{{"label", label}, {"file", file.absoluteFilePath()},
+        {"map", map.isFile() ? map.absoluteFilePath() : QString()}});
+    }
+  } catch (const std::exception &) {
+    // The desktop app also works in hardware-only workspaces.
+  }
+  return worlds;
+}
+
+QProcessEnvironment ProcessManager::gazeboEnvironment() const
+{
+  auto environment = QProcessEnvironment::systemEnvironment();
+  if (!gazebo_partition_.isEmpty()) environment.insert("GZ_PARTITION", gazebo_partition_);
+  if (simulation_domain_ >= 0) environment.insert("ROS_DOMAIN_ID", QString::number(simulation_domain_));
+  return environment;
+}
+
+bool ProcessManager::startSimulationWorld(const QString & world_file, const QString & map_file, int domain)
+{
+  if (!gazebo_partition_.isEmpty() || domain < 0 || domain > 232) return false;
+  for (const auto * managed : managed_) {
+    if ((managed->name.startsWith(robot_run_prefix) || managed->name == "Gazebo world view") &&
+      (managed->process->state() != QProcess::NotRunning || managed->removal_process)) return false;
+  }
+  const auto path = absolute_local_file(world_file);
+  const auto name = sdf_world_name(path);
+  const auto map = absolute_local_file(map_file);
+  if (name.isEmpty() || (!map_file.isEmpty() && map.isEmpty())) {
+    appendLog("Choose a readable Gazebo SDF file containing exactly one named world and a readable optional map.");
+    return false;
+  }
+
+  simulation_world_file_ = path;
+  simulation_world_name_ = name;
+  simulation_domain_ = domain;
+  gazebo_partition_ = "mur_command_center_" + QUuid::createUuid().toString(QUuid::Id128);
+  setGazeboServerStatus("Not checked");
+  QStringList args{"launch", "match_mur_gui", "simulation_world.launch.py", "world_file:=" + path};
+  if (!map.isEmpty()) args << "map_file:=" + map;
+  return startLocalProcess(world_process, "ros2", args, gazeboEnvironment());
+}
+
+bool ProcessManager::spawnSimulationRobot(const QString & robot, const QString & model, double x, double y, double yaw)
+{
+  static const QRegularExpression valid_robot("^mur620[a-d]$");
+  if (simulation_domain_ < 0 || gazebo_server_status_ != "Available" || gazebo_probe_age_.hasExpired(5000) ||
+    !valid_robot.match(robot).hasMatch() || (model != "mir" && model != "mur620") ||
+    !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(yaw)) return false;
+  const auto name = robot_run_prefix + robot;
+  const auto * managed = managed_.value(name, nullptr);
+  if (managed && (managed->removal_process || managed->state == "Stop failed")) return false;
+  return startLocalProcess(name, "ros2", {
+    "launch", "match_mur_gui", "simulation_robot.launch.py", "robot:=" + robot, "model:=" + model,
+    "world:=" + simulation_world_name_, "world_file:=" + simulation_world_file_,
+    "x:=" + QString::number(x), "y:=" + QString::number(y), "Y:=" + QString::number(yaw)
+  }, gazeboEnvironment());
 }
 
 QVariantList ProcessManager::processes() const
@@ -127,7 +258,7 @@ bool ProcessManager::startSimulation(const QString & robot)
 {
   static const QRegularExpression valid_robot("^[A-Za-z][A-Za-z0-9_]*$");
   if (!valid_robot.match(robot).hasMatch()) return false;
-  return startProcess("MUR620 simulation", "ros2", simulation_arguments(robot));
+  return startProcess(QT_TRANSLATE_NOOP("CommandCenter", "MUR620 simulation"), "ros2", simulation_arguments(robot));
 }
 
 bool ProcessManager::startRemoteSimulation(const QString & host, int ros_domain, const QString & robot)
@@ -139,7 +270,7 @@ bool ProcessManager::startRemoteSimulation(const QString & host, int ros_domain,
     ros_domain < 0 || ros_domain > 232 || !valid_robot.match(robot).hasMatch()) return false;
   const auto command = QString("ros2 launch mur_launch_sim mur620.launch.py robot_name:=%1 "
     "include_gz:=true gazebo_gui:=false launch_rviz:=false").arg(shell_quote(robot));
-  return startRemoteOwnedProcess("Remote MUR620 simulation", trimmed_host, ros_domain,
+  return startRemoteOwnedProcess(QT_TRANSLATE_NOOP("CommandCenter", "Remote MUR620 simulation"), trimmed_host, ros_domain,
     command, QString("Starting remote MuR simulation on %1 · domain %2 · robot %3")
       .arg(trimmed_host).arg(ros_domain).arg(robot));
 }
@@ -231,8 +362,8 @@ bool ProcessManager::startRemoteOwnedProcess(const QString & process_name, const
         }
         managed->exit_code = exit_code;
         const auto final_state = managed->remote && managed->stopping && managed->remote_pid <= 1
-          ? "Stop unconfirmed" : managed->stopping ? "Stopped" :
-          (status == QProcess::NormalExit && exit_code == 0 ? "Exited" : "Failed");
+          ? QT_TRANSLATE_NOOP("CommandCenter", "Stop unconfirmed") : managed->stopping ? QT_TRANSLATE_NOOP("CommandCenter", "Stopped") :
+          (status == QProcess::NormalExit && exit_code == 0 ? QT_TRANSLATE_NOOP("CommandCenter", "Exited") : "Failed");
         managed->stopping = false;
         setState(managed, final_state);
         appendLog(QString("%1 on %2 finished with exit code %3 (%4)")
@@ -281,6 +412,8 @@ void ProcessManager::probeGazeboServer()
   if (gazebo_server_status_ == "Available" && gazebo_probe_age_.hasExpired(5000)) {
     setGazeboServerStatus("Not checked");
   }
+  probe_partition_ = gazebo_partition_;
+  gazebo_probe_.setProcessEnvironment(gazeboEnvironment());
   gazebo_probe_timeout_.start(4000);
   gazebo_probe_.start("gz", {"service", "-l"});
 }
@@ -299,11 +432,20 @@ bool ProcessManager::startGazeboView()
     probeGazeboServer();
     return false;
   }
-  return startProcess("Gazebo world view", "gz", {"sim", "-g"});
+  return startLocalProcess(QT_TRANSLATE_NOOP("CommandCenter", "Gazebo world view"),
+    "gz", {"sim", "-g"}, gazeboEnvironment());
 }
 
 bool ProcessManager::startProcess(const QString & name, const QString & program,
   const QStringList & arguments)
+{
+  auto environment = QProcessEnvironment::systemEnvironment();
+  if (!environment.contains("ROS_DOMAIN_ID")) environment.insert("ROS_DOMAIN_ID", "62");
+  return startLocalProcess(name, program, arguments, environment);
+}
+
+bool ProcessManager::startLocalProcess(const QString & name, const QString & program,
+  const QStringList & arguments, const QProcessEnvironment & environment)
 {
   if (name.trimmed().isEmpty() || program.trimmed().isEmpty()) return false;
   auto * managed = managed_.value(name, nullptr);
@@ -326,7 +468,7 @@ bool ProcessManager::startProcess(const QString & name, const QString & program,
         const auto final_state = managed->stopping ? "Stopped" :
           (status == QProcess::NormalExit && exit_code == 0 ? "Exited" : "Failed");
         managed->stopping = false;
-        setState(managed, final_state);
+        onLocalProcessFinished(managed, final_state);
         if (log_store_) log_store_->append(managed->log_source,
           final_state == "Failed" ? "ERROR" : "INFO",
           QString("Process finished with exit code %1 (%2)").arg(exit_code).arg(final_state));
@@ -336,7 +478,7 @@ bool ProcessManager::startProcess(const QString & name, const QString & program,
       [this, managed](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart) {
           managed->exit_code = -1;
-          setState(managed, "Failed");
+          onLocalProcessFinished(managed, "Failed");
           if (log_store_) log_store_->append(managed->log_source, "ERROR",
             QString("Process could not start: %1").arg(managed->process->errorString()));
           appendLog(QString("%1 could not start: %2")
@@ -346,10 +488,10 @@ bool ProcessManager::startProcess(const QString & name, const QString & program,
     connect(managed->process, &QProcess::started, this, [this, managed]() {
       if (managed->stopping) {
         const auto pid = static_cast<pid_t>(managed->process->processId());
-        if (pid > 1) ::kill(-pid, SIGINT);
-        setState(managed, "Stopping");
+        interrupt_local_process(pid);
+        setState(managed, QT_TRANSLATE_NOOP("CommandCenter", "Stopping"));
       } else {
-        setState(managed, "Running");
+        setState(managed, QT_TRANSLATE_NOOP("CommandCenter", "Running"));
       }
     });
   }
@@ -358,17 +500,13 @@ bool ProcessManager::startProcess(const QString & name, const QString & program,
   managed->log_source = QString("%1 · run %2").arg(name).arg(managed->run_number);
   managed->exit_code = -1;
   managed->stopping = false;
-  auto environment = QProcessEnvironment::systemEnvironment();
-  // The desktop launcher normally starts us with ROS already sourced. Preserve that
-  // environment and make the profile's local ROS domain explicit for ROS commands.
-  if (!environment.contains("ROS_DOMAIN_ID")) environment.insert("ROS_DOMAIN_ID", "62");
   managed->process->setProcessEnvironment(environment);
   managed->process->setProgram("/usr/bin/setsid");
   QStringList owned_argv{program};
   owned_argv.append(arguments);
   managed->process->setArguments(owned_argv);
   managed->process->setProcessChannelMode(QProcess::SeparateChannels);
-  setState(managed, "Starting");
+  setState(managed, QT_TRANSLATE_NOOP("CommandCenter", "Starting"));
   appendLog(QString("Starting %1: %2 %3")
     .arg(name, program, arguments.join(' ')));
   if (log_store_) log_store_->append(managed->log_source, "INFO",
@@ -377,10 +515,67 @@ bool ProcessManager::startProcess(const QString & name, const QString & program,
   return true;
 }
 
+void ProcessManager::stopWorldChildren()
+{
+  for (const auto & name : managed_.keys()) {
+    if (name.startsWith(robot_run_prefix) || name == "Gazebo world view") stopProcess(name);
+  }
+}
+
+void ProcessManager::onLocalProcessFinished(ManagedProcess * managed, const QString & state)
+{
+  if (managed->name == world_process) {
+    simulation_domain_ = -1;
+    simulation_world_name_.clear();
+    simulation_world_file_.clear();
+    gazebo_partition_.clear();
+    setGazeboServerStatus("Not checked");
+    stopWorldChildren();
+  }
+  const auto * world = managed_.value(world_process, nullptr);
+  if (!managed->name.startsWith(robot_run_prefix) || simulation_world_name_.isEmpty() || !world || world->stopping) {
+    setState(managed, state);
+    return;
+  }
+
+  const auto robot = managed->name.mid(robot_run_prefix.size());
+  setState(managed, "Stopping");
+  auto * removal = new QProcess(this);
+  managed->removal_process = removal;
+  removal->setProcessEnvironment(gazeboEnvironment());
+  const auto finish = [this, managed, removal, state](bool removed) {
+    const auto final_state = removed || simulation_world_name_.isEmpty() ? state : QString("Stop failed");
+    managed->removal_process = nullptr;
+    setState(managed, final_state);
+    if (final_state == "Stop failed") appendLog(managed->name + " · could not confirm removal from Gazebo");
+    removal->deleteLater();
+  };
+  connect(removal, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+    [removal, finish](int code, QProcess::ExitStatus status) {
+      finish(status == QProcess::NormalExit && code == 0 &&
+        removal->readAllStandardOutput().contains("data: true"));
+    });
+  connect(removal, &QProcess::errorOccurred, this, [finish](QProcess::ProcessError error) {
+    if (error == QProcess::FailedToStart) finish(false);
+  });
+  QTimer::singleShot(3500, removal, [removal]() {
+    if (removal->state() != QProcess::NotRunning) removal->kill();
+  });
+  removal->start("gz", {"service", "-s", "/world/" + simulation_world_name_ + "/remove/blocking",
+    "--reqtype", "gz.msgs.Entity", "--reptype", "gz.msgs.Boolean", "--timeout", "2000",
+    "--req", "name: \"" + robot + "\" type: MODEL"});
+}
+
 void ProcessManager::stopProcess(const QString & name)
 {
   auto * managed = managed_.value(name, nullptr);
-  if (!managed || managed->process->state() == QProcess::NotRunning) return;
+  if (!managed) return;
+  if (managed->process->state() == QProcess::NotRunning) {
+    if (name.startsWith(robot_run_prefix) && managed->state == "Stop failed" && !managed->removal_process) {
+      onLocalProcessFinished(managed, "Stopped");
+    }
+    return;
+  }
   if (managed->remote) {
     if (managed->stopping && managed->stop_process) return;
     if (managed->remote_pid <= 1) {
@@ -397,7 +592,7 @@ void ProcessManager::stopProcess(const QString & name)
         if (managed->stop_process != stop_process) return;
         if (status != QProcess::NormalExit || code != 0) {
           managed->stopping = false;
-          managed->state = "Stop failed";
+          managed->state = QT_TRANSLATE_NOOP("CommandCenter", "Stop failed");
           appendLog(QString("Could not confirm stop of app-owned remote run on %1; remote process may still be running")
             .arg(managed->host));
           emit changed();
@@ -426,10 +621,11 @@ void ProcessManager::stopProcess(const QString & name)
     return;
   }
   managed->stopping = true;
+  if (name == world_process) stopWorldChildren();
   // setsid gives this QProcess its own session/process group. Signalling the negative
   // PID reaches only this app-owned launch and the children it created.
   const auto pid = static_cast<pid_t>(managed->process->processId());
-  if (pid > 1) ::kill(-pid, SIGINT);
+  interrupt_local_process(pid);
   setState(managed, "Stopping");
   const auto run_number = managed->run_number;
   QTimer::singleShot(8000, this, [this, managed, pid, run_number]() {

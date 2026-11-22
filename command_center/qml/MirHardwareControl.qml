@@ -91,13 +91,13 @@ Item {
             spacing: 10
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "MiR base and lights"; color: panel.foreground; font.pixelSize: 20; font.bold: true }
+                Label { text: qsTr("MiR base and lights"); color: panel.foreground; font.pixelSize: 20; font.bold: true }
                 Item { Layout.fillWidth: true }
                 Label { text: "/" + session.robot + " · " + session.target; color: panel.muted }
             }
             Label {
                 Layout.fillWidth: true
-                text: "Configure the MiR command topic and type in Settings. Jog requires a verified subscriber. Maximum 0.15 m/s and 0.4 rad/s."
+                text: qsTr("Configure the MiR command topic and type in Settings. Jog requires a verified subscriber. Maximum 0.15 m/s and 0.4 rad/s.")
                 color: panel.muted
                 wrapMode: Text.WordWrap
             }
@@ -105,7 +105,7 @@ Item {
                 Layout.fillWidth: true
                 Switch {
                     id: armSwitch
-                    text: checked ? "MiR jog armed" : "Explicitly arm MiR jog"
+                    text: checked ? qsTr("MiR jog armed") : qsTr("Explicitly arm MiR jog")
                     checked: mirHardwareControl.armed
                     enabled: session.mode === "Hardware" && session.connectionState === "Connected"
                     onToggled: mirHardwareControl.setArmed(checked)
@@ -116,19 +116,19 @@ Item {
                     text: "STOP"
                     enabled: mirHardwareControl.holding
                     onClicked: panel.stopJog("Stop button")
-                    Accessible.name: "Stop MiR jog"
+                    Accessible.name: qsTr("Stop MiR jog")
                 }
             }
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "Linear · " + mirHardwareControl.linearSpeed.toFixed(2) + " m/s"; color: panel.muted }
+                Label { text: qsTr("Linear · %1 m/s").arg(mirHardwareControl.linearSpeed.toFixed(2)); color: panel.muted }
                 Slider {
                     Layout.fillWidth: true
                     from: 0.01; to: 0.15; value: mirHardwareControl.linearSpeed
                     enabled: armSwitch.checked
                     onMoved: mirHardwareControl.setLinearSpeed(value)
                 }
-                Label { text: "Turn · " + mirHardwareControl.angularSpeed.toFixed(2) + " rad/s"; color: panel.muted }
+                Label { text: qsTr("Turn · %1 rad/s").arg(mirHardwareControl.angularSpeed.toFixed(2)); color: panel.muted }
                 Slider {
                     Layout.fillWidth: true
                     from: 0.05; to: 0.4; value: mirHardwareControl.angularSpeed
@@ -142,31 +142,31 @@ Item {
                 rowSpacing: 6
                 columnSpacing: 8
                 Item { width: 104; height: 42 }
-                HoldButton { text: "Forward"; direction: "forward" }
+                HoldButton { text: qsTr("Forward"); direction: "forward" }
                 Item { width: 104; height: 42 }
-                HoldButton { text: "Turn left"; direction: "left" }
-                HoldButton { text: "Backward"; direction: "backward" }
-                HoldButton { text: "Turn right"; direction: "right" }
+                HoldButton { text: qsTr("Turn left"); direction: "left" }
+                HoldButton { text: qsTr("Backward"); direction: "backward" }
+                HoldButton { text: qsTr("Turn right"); direction: "right" }
             }
             Label {
                 Layout.fillWidth: true
                 text: mirHardwareControl.status
-                color: mirHardwareControl.holding ? theme.accent : panel.muted
+                color: mirHardwareControl.holding ? theme.focus : panel.muted
                 Accessible.name: mirHardwareControl.status
             }
             Rectangle { Layout.fillWidth: true; height: 1; color: theme.line }
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "Lights"; color: panel.foreground; font.bold: true }
-                Button { text: "Rainbow"; enabled: session.mode === "Hardware" && session.connectionState === "Connected"; onClicked: mirHardwareControl.rainbowStart() }
-                Button { text: "Stop effect"; enabled: session.mode === "Hardware" && session.connectionState === "Connected"; onClicked: mirHardwareControl.rainbowStop() }
-                Button { text: "MATCH color"; enabled: session.mode === "Hardware" && session.connectionState === "Connected"; onClicked: mirHardwareControl.matchColor() }
-                Button { text: "Solid color…"; enabled: session.mode === "Hardware" && session.connectionState === "Connected"; onClicked: colorDialog.open() }
+                Label { text: qsTr("Lights"); color: panel.foreground; font.bold: true }
+                Button { text: qsTr("Rainbow"); enabled: session.mode === "Hardware" && session.connectionState === "Connected"; onClicked: mirHardwareControl.rainbowStart() }
+                Button { text: qsTr("Stop effect"); enabled: session.mode === "Hardware" && session.connectionState === "Connected"; onClicked: mirHardwareControl.rainbowStop() }
+                Button { text: qsTr("MATCH color"); enabled: session.mode === "Hardware" && session.connectionState === "Connected"; onClicked: mirHardwareControl.matchColor() }
+                Button { text: qsTr("Solid color…"); enabled: session.mode === "Hardware" && session.connectionState === "Connected"; onClicked: colorDialog.open() }
             }
             Label {
                 Layout.fillWidth: true
                 text: mirHardwareControl.lightStatus
-                color: mirHardwareControl.lightStatus.indexOf("Applied") === 0 ? theme.accent : panel.muted
+                color: mirHardwareControl.lightStatus.indexOf("Applied") === 0 ? theme.focus : panel.muted
                 wrapMode: Text.WordWrap
                 Accessible.name: mirHardwareControl.lightStatus
             }
@@ -195,7 +195,7 @@ Item {
 
     NativeDialogs.ColorDialog {
         id: colorDialog
-        title: "MiR solid color"
+        title: qsTr("MiR solid color")
         onAccepted: mirHardwareControl.setSolidColor(
             Math.round(selectedColor.r * 255),
             Math.round(selectedColor.g * 255),

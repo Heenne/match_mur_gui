@@ -32,10 +32,10 @@ Item {
                 anchors.margins: 18
                 spacing: 8
 
-                Label { text: "Overview"; color: theme.muted; font.weight: Font.DemiBold }
+                Label { text: qsTr("Overview"); color: theme.muted; font.weight: Font.DemiBold }
                 Label {
                     width: parent.width
-                    text: page.sessionController.mode === "Simulation" ? "Simulation workspace" : "Hardware workspace"
+                    text: page.sessionController.mode === "Simulation" ? qsTr("Simulation workspace") : qsTr("Hardware workspace")
                     color: theme.ink
                     font.pixelSize: 26
                     font.weight: Font.DemiBold
@@ -45,15 +45,15 @@ Item {
                     width: parent.width
                     color: theme.muted
                     text: page.sessionController.mode === "Simulation"
-                          ? "Start and monitor the selected robot in Gazebo. Use Diagnosis to check its ROS graph."
-                          : "Check the selected robot and its ROS graph before starting hardware workflows."
+                          ? qsTr("Start and monitor the selected robot in Gazebo. Use Diagnosis to check its ROS graph.")
+                          : qsTr("Check the selected robot and its ROS graph before starting hardware workflows.")
                     wrapMode: Text.WordWrap
                 }
                 Flow {
                     width: parent.width
                     spacing: 8
-                    ActionButton { text: "Open processes"; primary: true; onClicked: page.pageRequested("Processes") }
-                    ActionButton { text: "Open diagnosis"; onClicked: page.pageRequested("Diagnosis") }
+                    ActionButton { text: qsTr("Open processes"); primary: true; onClicked: page.pageRequested("Processes") }
+                    ActionButton { text: qsTr("Open diagnosis"); onClicked: page.pageRequested("Diagnosis") }
                 }
             }
         }
@@ -65,10 +65,10 @@ Item {
             readonly property int columns: width >= 560 ? 4 : 2
             Repeater {
                 model: [
-                    {name: "Preset", value: page.sessionController.preset},
-                    {name: "Robot", value: page.sessionController.robot},
-                    {name: "Target", value: page.sessionController.target},
-                    {name: "ROS domain", value: String(page.sessionController.rosDomain)}
+                    {name: qsTr("Preset"), value: page.sessionController.preset},
+                    {name: qsTr("Robot"), value: page.sessionController.robot},
+                    {name: qsTr("Target"), value: page.sessionController.target},
+                    {name: qsTr("ROS domain"), value: String(page.sessionController.rosDomain)}
                 ]
                 delegate: Rectangle {
                     required property var modelData
@@ -112,17 +112,17 @@ Item {
                 anchors.right: parent.right
                 anchors.margins: 14
                 spacing: 8
-                Label { text: "Managed processes"; color: theme.ink; font.weight: Font.DemiBold }
-                Label { visible: page.runs.length === 0; text: "No managed processes"; color: theme.muted }
+                Label { text: qsTr("Managed processes"); color: theme.ink; font.weight: Font.DemiBold }
+                Label { visible: page.runs.length === 0; text: qsTr("No managed processes"); color: theme.muted }
                 Repeater {
                     model: page.runs
                     delegate: RowLayout {
                         required property var modelData
                         width: processesLayout.width
-                        Label { Layout.fillWidth: true; text: modelData.name; color: theme.ink; elide: Text.ElideRight }
+                        Label { Layout.fillWidth: true; text: uiText(modelData.name); color: theme.ink; elide: Text.ElideRight }
                         StatusBadge {
-                            label: modelData.state
-                            foreground: modelData.state === "Running" ? theme.accent : theme.muted
+                            label: uiText(modelData.state)
+                            foreground: modelData.state === "Running" ? theme.focus : theme.muted
                             color: modelData.state === "Running" ? theme.selected : theme.raised
                         }
                     }

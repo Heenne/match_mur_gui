@@ -44,6 +44,15 @@ ros2 run match_mur_gui mur_command_center
 Einzelheiten zu Profilen, Prozessen und ROS-Anbindung stehen in der
 [Dokumentation zum Command Center](command_center/README.md).
 
+### Mehrere Roboter lokal simulieren
+
+1. Wähle **Simulation** mit Ziel **localhost**, öffne **Prozesse** und wähle eine Gazebo-Welt. Über **Gazebo-Welt auswählen** kannst du eine eigene `.world`- oder `.sdf`-Datei dauerhaft zur Auswahlliste hinzufügen. Die optionale **ROS-Karte** ist eine separate YAML-Datei mit dem zugehörigen Kartenbild und erscheint auf `/map`.
+2. Stelle den Fenster-Schalter ein und klicke **Simulationswelt starten**. Sobald Gazebo zum Einsetzen von Robotern bereit ist, werden die Buttons in deren Zeilen freigegeben.
+3. Wähle für `mur620a` bis `mur620d` je **MiR-Basis** oder **MuR620** sowie die Startkoordinaten in Metern. Klicke je Zeile **Einsetzen**. Die vier Roboter können in derselben Welt laufen. Bei einer eigenen Welt sollten die Startpositionen auf freien Flächen liegen.
+4. Klicke beim gewünschten Roboter **Steuern** und dann **Verbinden**. Gib im Bereich **Roboter** das Joggen frei und halte eine Richtung gedrückt. Beim Roboterwechsel verbindet sich die App nach erneutem Klick auf **Verbinden** mit dem neuen Ziel. Die MuR620-Variante startet zusätzlich die Arm- und Lift-Controller sowie den namespaced MoveIt-Stack.
+
+Die lokale Simulation benötigt die Pakete `mir_gazebo`, `mir_description` und `mur_launch_sim` aus `match_mobile_robotics_jazzy` im gesourcten Workspace. Die Welt und die Roboter laufen in derselben Gazebo-Partition und ROS-Domain. Das Öffnen oder Schließen der Weltansicht ändert den laufenden Aufbau nicht.
+
 ### Bestehende PyQt5-Basis-GUI
 
 Die PyQt5-Basisoberfläche ist weiterhin separat verfügbar:

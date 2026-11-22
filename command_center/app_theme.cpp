@@ -6,30 +6,54 @@
 
 namespace app_theme
 {
-const QVariantMap & colors()
+namespace
 {
-  static const QVariantMap palette{
-    {"canvas", QColor("#0d131d")}, {"surface", QColor("#151e2b")},
-    {"raised", QColor("#1c2838")}, {"hover", QColor("#253449")},
-    {"line", QColor("#2d3c51")}, {"ink", QColor("#eef3fb")},
-    {"muted", QColor("#a7b6cc")}, {"subtle", QColor("#778ba5")},
-    {"accent", QColor("#65e5c6")}, {"accentInk", QColor("#092920")},
-    {"selected", QColor("#183b3b")}, {"selectedLine", QColor("#31635e")},
-    {"warning", QColor("#f4c47b")}, {"warningSurface", QColor("#3b2e20")},
-    {"danger", QColor("#ff9ea5")}, {"dangerSurface", QColor("#432730")},
-    {"info", QColor("#9cc9ff")}, {"infoSurface", QColor("#24354d")},
-  };
-  return palette;
+bool light_theme = false;
 }
 
-void apply(QApplication & app)
+const QVariantMap & colors()
 {
-  app.setStyle("Fusion");
+  static const QVariantMap dark{
+    {"canvas", QColor("#181A1D")}, {"surface", QColor("#24272B")},
+    {"raised", QColor("#1D2024")}, {"formSection", QColor("#2C3137")},
+    {"hover", QColor("#30353B")}, {"sidebar", QColor("#1D2024")},
+    {"line", QColor("#3B4047")}, {"ink", QColor("#F0F1F3")},
+    {"muted", QColor("#B0B5BD")}, {"subtle", QColor("#B0B5BD")},
+    {"accent", QColor("#B1CA21")}, {"accentInk", QColor("#202900")},
+    {"focus", QColor("#B1CA21")}, {"selected", QColor("#30353B")},
+    {"selectedLine", QColor("#B1CA21")}, {"badge", QColor("#343A42")},
+    {"badgeInk", QColor("#E0E4EA")}, {"tooltip", QColor("#30353B")},
+    {"tooltipInk", QColor("#C3C8CF")},
+    {"warning", QColor("#F4C47B")}, {"warningSurface", QColor("#3B2E20")},
+    {"danger", QColor("#FFAAA5")}, {"dangerSurface", QColor("#42272B")},
+    {"info", QColor("#B0B5BD")}, {"infoSurface", QColor("#343A42")},
+  };
+  static const QVariantMap light{
+    {"canvas", QColor("#F5F5F5")}, {"surface", QColor("#FFFFFF")},
+    {"raised", QColor("#F0F0F0")}, {"formSection", QColor("#FFFFFF")},
+    {"hover", QColor("#EEEEEE")}, {"sidebar", QColor("#FFFFFF")},
+    {"line", QColor("#DEDEDE")}, {"ink", QColor("#242424")},
+    {"muted", QColor("#666666")}, {"subtle", QColor("#626262")},
+    {"accent", QColor("#B1CA21")}, {"accentInk", QColor("#242900")},
+    {"focus", QColor("#647900")}, {"selected", QColor("#EEEEEE")},
+    {"selectedLine", QColor("#B1CA21")}, {"badge", QColor("#EEEEEE")},
+    {"badgeInk", QColor("#454545")}, {"tooltip", QColor("#FAFAFA")},
+    {"tooltipInk", QColor("#555555")},
+    {"warning", QColor("#81510B")}, {"warningSurface", QColor("#FFF0D8")},
+    {"danger", QColor("#AD4B1E")}, {"dangerSurface", QColor("#FFF0E6")},
+    {"info", QColor("#626262")}, {"infoSurface", QColor("#EEEEEE")},
+  };
+  return light_theme ? light : dark;
+}
+
+void apply(QApplication & app, bool light)
+{
+  light_theme = light;
   const auto color = [](const QString & key) { return colors().value(key).value<QColor>(); };
   QPalette palette;
   palette.setColor(QPalette::Window, color("surface"));
   palette.setColor(QPalette::WindowText, color("ink"));
-  palette.setColor(QPalette::Base, color("canvas"));
+  palette.setColor(QPalette::Base, color("raised"));
   palette.setColor(QPalette::AlternateBase, color("surface"));
   palette.setColor(QPalette::Text, color("ink"));
   palette.setColor(QPalette::Button, color("raised"));
@@ -43,8 +67,8 @@ void apply(QApplication & app)
   palette.setColor(QPalette::Highlight, color("accent"));
   palette.setColor(QPalette::HighlightedText, color("accentInk"));
   palette.setColor(QPalette::Link, color("info"));
-  palette.setColor(QPalette::ToolTipBase, color("hover"));
-  palette.setColor(QPalette::ToolTipText, color("ink"));
+  palette.setColor(QPalette::ToolTipBase, color("tooltip"));
+  palette.setColor(QPalette::ToolTipText, color("tooltipInk"));
   palette.setColor(QPalette::PlaceholderText, color("muted"));
   for (auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText}) {
     palette.setColor(QPalette::Disabled, role, color("subtle"));
@@ -67,7 +91,7 @@ void apply(QApplication & app)
     QWidget#commandLogPanel QPlainTextEdit { border: 1px solid %2; border-radius: 6px; padding: 5px; }
     QWidget#commandLogPanel QTabWidget::pane { border: 1px solid %2; border-radius: 5px; }
     QWidget#commandLogPanel QTabBar::tab { background: %1; color: %4; padding: 6px 12px; }
-    QWidget#commandLogPanel QTabBar::tab:selected { background: %5; color: %3; }
+    QWidget#commandLogPanel QTabBar::tab:selected { background: %5; color: palette(text); border-bottom: 2px solid %3; }
   )CSS").arg(color("surface").name(), color("line").name(), color("accent").name(),
     color("muted").name(), color("selected").name()));
 }

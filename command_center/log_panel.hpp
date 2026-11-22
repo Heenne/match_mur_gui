@@ -8,6 +8,8 @@
 
 class QLineEdit;
 class QDockWidget;
+class QCheckBox;
+class QPushButton;
 class LogPanel : public QWidget
 {
   Q_OBJECT
@@ -21,17 +23,24 @@ public slots:
   Q_INVOKABLE void setSessionLabel(const QString & label);
   void setDock(QDockWidget * dock) { dock_ = dock; }
 
+protected:
+  void changeEvent(QEvent * event) override;
+
 private slots:
   void refreshSources();
   void exportFull();
   void exportFiltered();
 
 private:
+  void retranslate();
   LogStore * store_;
   QTabWidget * panes_[2];
   QVector<QWidget *> pane_widgets_[2];
   QString selected_source_;
   QLineEdit * session_label_{nullptr};
+  QCheckBox * compare_;
+  QPushButton * export_full_;
+  QPushButton * export_filtered_;
   QDockWidget * dock_{nullptr};
 };
 

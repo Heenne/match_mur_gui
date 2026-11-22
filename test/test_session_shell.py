@@ -95,9 +95,13 @@ def test_rviz_uses_active_profile_config_and_time_source(tmp_path):
     assert user_settings.read_text() == "[General]\nactivePreset=Operator profile\n"
 
 
-def test_missing_rviz_file_leaves_navigation_reachable():
+def test_missing_rviz_file_leaves_navigation_reachable(tmp_path):
     executable = Path(get_package_prefix("match_mur_gui")) / "lib/match_mur_gui/mur_command_center"
     environment = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software")
+    gazebo = tmp_path / "gz"
+    gazebo.write_text("#!/bin/sh\nexit 0\n")
+    gazebo.chmod(0o755)
+    environment["PATH"] = str(tmp_path) + os.pathsep + environment["PATH"]
     result = subprocess.run(
         [str(executable), "--contract-test-connection-error-layout"],
         env=environment, text=True, capture_output=True, timeout=10,

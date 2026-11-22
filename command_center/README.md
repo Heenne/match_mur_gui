@@ -95,14 +95,16 @@ not switch controllers or start the UR driver; the integrated Cartesian
 controller must already be active. The app does not replace the robot's
 safety-rated stop or teach pendant.
 
-The Processes view starts the local MuR620 simulation and manages the Gazebo
-world view as a separate `gz sim -g` client. Starting or stopping the client
-does not stop the simulation server, `/clock`, ROS bridge, or their logs. The
-client becomes available when the Gazebo Transport service `/gazebo/worlds` is
-discovered in the local partition. This works independently of the app's ROS
-connection and RViz configuration. When auto-open is enabled, starting the
-simulation waits up to 60 seconds for this service. Client launch output and
-failure state appear in Processes.
+In Processes, choose a Gazebo world and start it before spawning robots. The
+world can also publish a separate ROS occupancy map. Spawn `mur620a` through
+`mur620d` independently, each as a MiR base or a full MuR620. **Control** selects
+the robot and its base command topic. Use **Connect**, then enable jog on the
+Robot page. Simulation profiles without a custom RViz configuration use the
+built-in view for the selected robot.
+
+The Gazebo world view runs as a separate `gz sim -g` client. The server,
+`/clock`, and the robots continue running when its window closes. The app
+opens the window once the world is ready if the startup switch is on.
 
 The Logs dock opens with one view. Enable **Compare logs** to show a second
 view with its own source and filters. **Follow latest** scrolls the active log

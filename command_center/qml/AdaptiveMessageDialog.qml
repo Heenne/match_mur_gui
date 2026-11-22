@@ -8,9 +8,13 @@ Dialog {
     parent: Overlay.overlay
     anchors.centerIn: parent
     modal: true
-    standardButtons: Dialog.Ok | Dialog.Cancel
     width: Math.min(520, Math.max(0, parent.width - 24))
     height: Math.min(340, Math.max(0, parent.height - 24))
+
+    footer: DialogButtonBox {
+        Button { text: qsTr("Cancel"); DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
+        Button { text: qsTr("Confirm"); DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole }
+    }
 
     contentItem: ScrollView {
         id: messageView

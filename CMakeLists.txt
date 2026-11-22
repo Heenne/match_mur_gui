@@ -30,6 +30,8 @@ find_package(ur_dashboard_msgs REQUIRED)
 add_executable(mur_command_center
   command_center/main.cpp
   command_center/app_theme.cpp
+  command_center/ui_preferences.cpp
+  command_center/ui_preferences.hpp
   command_center/ros_session_monitor.cpp
   command_center/hardware_status.cpp
   command_center/hardware_status.hpp
@@ -127,9 +129,21 @@ if(BUILD_TESTING)
 endif()
 
 install(DIRECTORY assets/ DESTINATION share/${PROJECT_NAME}/assets)
+install(DIRECTORY launch DESTINATION share/${PROJECT_NAME} FILES_MATCHING PATTERN "*.launch.py")
 
 install(DIRECTORY command_center/qml
   DESTINATION share/${PROJECT_NAME}/command_center
 )
+
+find_program(QT_LRELEASE_EXECUTABLE NAMES lrelease-qt5 lrelease REQUIRED)
+set(translation_source "${CMAKE_CURRENT_SOURCE_DIR}/command_center/translations/command_center_de.ts")
+set(translation_catalog "${CMAKE_CURRENT_BINARY_DIR}/command_center_de.qm")
+add_custom_command(OUTPUT "${translation_catalog}"
+  COMMAND "${QT_LRELEASE_EXECUTABLE}" "${translation_source}" -qm "${translation_catalog}"
+  DEPENDS "${translation_source}"
+  VERBATIM)
+add_custom_target(command_center_translations ALL DEPENDS "${translation_catalog}")
+add_dependencies(mur_command_center command_center_translations)
+install(FILES "${translation_catalog}" DESTINATION share/${PROJECT_NAME}/command_center/translations)
 
 ament_package()

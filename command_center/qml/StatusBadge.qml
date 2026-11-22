@@ -4,7 +4,7 @@ import QtQuick.Controls 2.5
 Rectangle {
     id: badge
     required property string label
-    property color foreground: theme.accent
+    property color foreground: theme.focus
     color: theme.selected
     radius: 12
     implicitWidth: statusText.implicitWidth + 20
